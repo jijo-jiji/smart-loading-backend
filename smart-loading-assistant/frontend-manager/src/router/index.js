@@ -1,11 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import ManagerView from '../views/ManagerView.vue'
-import OperatorView from '../views/OperatorView.vue'
+import Dashboard from '../views/Dashboard.vue'
 
 const routes = [
-  { path: '/', redirect: '/manager' },
-  { path: '/manager', component: ManagerView },
-  { path: '/operator', component: OperatorView },
+  { path: '/', component: Dashboard }
 ]
 
 export default createRouter({
