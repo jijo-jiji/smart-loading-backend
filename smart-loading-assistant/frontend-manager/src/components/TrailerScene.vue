@@ -25,44 +25,29 @@
         <TresMeshBasicMaterial color="#374151" wireframe />
       </TresMesh>
 
-      <!-- Trailer Bounds Outline -->
-      <TresLineSegments :position="[store.trailer.width / 2, store.trailer.height / 2, store.trailer.length / 2]">
-        <TresEdgesGeometry>
-          <TresBoxGeometry :args="[store.trailer.width, store.trailer.height, store.trailer.length]" />
-        </TresEdgesGeometry>
-        <TresLineBasicMaterial color="#4B5563" />
-      </TresLineSegments>
+      <!-- Scaled Group for Centimeter-based Components -->
+      <TresGroup :scale="[0.01, 0.01, 0.01]">
+        <!-- Trailer Bounds Outline (Green Wireframe) -->
+        <TruckContainer v-if="loadingStore.activePlan" :truck="loadingStore.activePlan.trucks" />
 
-      <!-- Loading Sequence (Zero-Cost GPU Scrubbing) -->
-      <TresGroup>
-        <TresMesh
-          v-for="(pallet, index) in store.loadingSequence"
-          :key="pallet.tracking_id"
-          :position="[pallet.x + (pallet.w / 2), pallet.z + (pallet.h / 2), pallet.y + (pallet.l / 2)]"
-          :visible="index <= store.scrubberIndex"
-        >
-          <TresBoxGeometry :args="[pallet.w, pallet.h, pallet.l]" />
-          <TresMeshStandardMaterial 
-            :color="isCollisionTarget(pallet.tracking_id) ? '#ffff00' : store.getPalletColor(pallet)"
-            :transparent="!!store.selectedRejection && !isCollisionTarget(pallet.tracking_id)"
-            :opacity="(store.selectedRejection && !isCollisionTarget(pallet.tracking_id)) ? 0.2 : 1.0"
-            :wireframe="store.viewMode === 'material' && pallet.material_class === 'HAZMAT'"
-          />
-        </TresMesh>
-      </TresGroup>
+        <!-- Cargo Boxes and Dunnage -->
+        <CargoMesh
+          v-if="loadingStore.currentSteps.length"
+          :steps="visibleSteps"
+          :highlight-id="store.selectedRejection"
+        />
 
-      <!-- Inspector Mode: Floating Ghost (contextual) -->
-      <TresGroup v-if="store.selectedRejection">
-        <TresMesh
-          :position="ghostPosition"
-        >
-          <TresBoxGeometry :args="[ghostW, ghostH, ghostL]" />
-          <TresMeshStandardMaterial 
-            color="#ef4444" 
-            transparent 
-            :opacity="0.8" 
-          />
-        </TresMesh>
+        <!-- Inspector Mode: Floating Ghost -->
+        <TresGroup v-if="store.selectedRejection">
+          <TresMesh :position="ghostPosition">
+            <TresBoxGeometry :args="[ghostW, ghostH, ghostL]" />
+            <TresMeshStandardMaterial 
+              color="#ef4444" 
+              transparent 
+              :opacity="0.8" 
+            />
+          </TresMesh>
+        </TresGroup>
       </TresGroup>
 
     </TresCanvas>
@@ -80,9 +65,17 @@
 import { ref, computed, watch } from 'vue'
 import { MapControls } from '@tresjs/cientos'
 import { useTransshipmentStore } from '../stores/useTransshipmentStore'
+import { useLoadingStore } from '../stores/useLoadingStore'
+import TruckContainer from './scene/TruckContainer.vue'
+import CargoMesh from './scene/CargoMesh.vue'
 
 const store = useTransshipmentStore()
+const loadingStore = useLoadingStore()
 const cameraRef = ref(null)
+
+const visibleSteps = computed(() => {
+  return loadingStore.currentSteps.slice(0, store.scrubberIndex + 1)
+})
 
 const isCollisionTarget = (trackingId) => {
   if (!store.selectedRejection) return false
@@ -93,33 +86,33 @@ const isCollisionTarget = (trackingId) => {
 // Ghost Box dimensions
 const ghostW = computed(() => {
   const rej = store.leftBehind.find(i => i.tracking_id === store.selectedRejection)
-  return rej ? rej.dimensions[0] : 1
-})
-const ghostL = computed(() => {
-  const rej = store.leftBehind.find(i => i.tracking_id === store.selectedRejection)
-  return rej ? rej.dimensions[1] : 1
+  return rej ? rej.dimensions[1] : 1 // lateral
 })
 const ghostH = computed(() => {
   const rej = store.leftBehind.find(i => i.tracking_id === store.selectedRejection)
-  return rej ? rej.dimensions[2] : 1
+  return rej ? rej.dimensions[2] : 1 // vertical
+})
+const ghostL = computed(() => {
+  const rej = store.leftBehind.find(i => i.tracking_id === store.selectedRejection)
+  return rej ? rej.dimensions[0] : 1 // depth
 })
 const ghostPosition = computed(() => {
   const rej = store.leftBehind.find(i => i.tracking_id === store.selectedRejection)
   if (!rej) return [0, 0, 0]
   
-  const w = rej.dimensions[0]
-  const l = rej.dimensions[1]
-  const h = rej.dimensions[2]
+  const w = rej.dimensions[1] // lateral
+  const h = rej.dimensions[2] // vertical
+  const l = rej.dimensions[0] // depth
   
   if (rej.best_attempt) {
     // If it has a best attempt, place it exactly where it failed inside the truck
     const { x, y, z, rotated } = rej.best_attempt
     const actualW = rotated ? l : w
     const actualL = rotated ? w : l
-    return [x + (actualW / 2), z + (h / 2), y + (actualL / 2)]
+    return [y + (actualW / 2), z + (h / 2), x + (actualL / 2)]
   } else {
     // Capacity Maxed: Place it floating outside the trailer doors
-    return [store.trailer.width / 2, 0.5 + (h / 2), store.trailer.length + 2]
+    return [(store.trailer.width * 100) / 2, 50 + (h / 2), (store.trailer.length * 100) + 200]
   }
 })
 
