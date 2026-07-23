@@ -1,5 +1,5 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
-const API_KEY = import.meta.env.VITE_API_KEY || 'super_secret_local_key'
+const API_URL = import.meta.env.VITE_API_URL || 'https://smart-loading-backend.onrender.com/api/v1'
+const API_KEY = import.meta.env.VITE_API_KEY || 'unikl_demo_secret_2026'
 
 function getHeaders() {
   return {
