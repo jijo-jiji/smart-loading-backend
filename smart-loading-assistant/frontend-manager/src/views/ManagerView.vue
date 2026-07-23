@@ -172,13 +172,51 @@ const sheetsToast = ref(null)
 
 onMounted(() => {
   store.startPolling()
-  transStore.loadMockPayload()
 })
 onUnmounted(() => store.stopPolling())
 
 // Link stores if needed when plan changes
-watch(() => store.activePlan, () => {
-  transStore.loadMockPayload()
+watch(() => store.currentSteps, (newSteps) => {
+  if (!newSteps || newSteps.length === 0) {
+    transStore.loadingSequence = []
+    return
+  }
+  
+  // Set trailer dimensions based on the active plan's truck (convert cm to meters)
+  const truck = store.activePlan?.trucks
+  if (truck) {
+    transStore.trailer = {
+      length: truck.length / 100,
+      width: truck.width / 100,
+      height: truck.height / 100
+    }
+  }
+
+  // Convert step data from cm to meters and map axes for the 3D engine
+  // Backend axes: X=depth, Y=lateral, Z=vertical
+  // Frontend expects: x=lateral, y=depth, z=vertical (based on TrailerScene.vue)
+  transStore.loadingSequence = newSteps.map(step => ({
+    tracking_id: step.cargo_item_id,
+    x: step.y / 100, // lateral
+    y: step.x / 100, // depth
+    z: step.z / 100, // vertical
+    w: step.orientation_width / 100,  // lateral size
+    l: step.orientation_length / 100, // depth size
+    h: step.orientation_height / 100, // vertical size
+    weight: 0, // Placeholder
+    material_class: 'INERT'
+  }))
+  
+  // Also load rejection data
+  if (store.activePlan?.status === 'PARTIAL_SUCCESS') {
+    transStore.leftBehind = [
+      { tracking_id: 'REJECTED', dimensions: [1.2, 1.0, 1.0], reason: store.activePlan.rejection_reason }
+    ]
+  } else {
+    transStore.leftBehind = []
+  }
+  
+  transStore.scrubberIndex = transStore.loadingSequence.length - 1
 })
 
 const filteredPlans = computed(() => {
