@@ -2,7 +2,7 @@
   <div class="scene-manager">
     <TresCanvas clear-color="#060d1f">
       <TresPerspectiveCamera ref="cameraRef" :position="initialCameraPos" :look-at="[0, 0, 0]" />
-      <OrbitControls v-if="mode === 'manager'" ref="controlsRef" />
+      <OrbitControls ref="controlsRef" />
       <TresAmbientLight :intensity="0.6" />
       <TresDirectionalLight :position="[800, 1200, 800]" :intensity="1.2" cast-shadow />
       <TresDirectionalLight :position="[-400, 400, -400]" :intensity="0.4" />
