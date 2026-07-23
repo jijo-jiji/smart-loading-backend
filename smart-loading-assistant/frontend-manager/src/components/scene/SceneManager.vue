@@ -20,7 +20,7 @@
       <!-- Global CG Sphere (Manager only) -->
       <TresMesh
         v-if="mode === 'manager' && store.activePlan?.cg_x"
-        :position="[store.activePlan.cg_x, store.activePlan.cg_z, store.activePlan.cg_y]"
+        :position="[store.activePlan.cg_y, store.activePlan.cg_z, store.activePlan.cg_x]"
       >
         <TresSphereGeometry :args="[8, 32, 32]" />
         <TresMeshStandardMaterial
@@ -125,10 +125,10 @@ watch(() => store.currentStepIndex, (newIdx) => {
   const nextStep = store.currentSteps[newIdx]
   if (!nextStep) return
 
-  // Compute centroid of next item in Three.js coordinate space (X, Z, Y mapping)
-  const cx = nextStep.x + nextStep.orientation_length / 2
+  // Compute centroid of next item in Three.js coordinate space (X=Lateral, Y=Vertical, Z=Depth)
+  const cx = nextStep.y + nextStep.orientation_width / 2
   const cy = nextStep.z + nextStep.orientation_height / 2
-  const cz = nextStep.y + nextStep.orientation_width / 2
+  const cz = nextStep.x + nextStep.orientation_length / 2
 
   lookTarget.set(cx, cy, cz)
   cameraTarget.set(cx + ISOMETRIC_OFFSET.x, cy + ISOMETRIC_OFFSET.y, cz + ISOMETRIC_OFFSET.z)

@@ -4,9 +4,9 @@
       v-for="step in steps"
       :key="step.id || step.cargo_item_id"
       :position="[
-        step.x + step.orientation_length / 2,
+        step.y + step.orientation_width / 2,
         step.z + step.orientation_height / 2,
-        step.y + step.orientation_width / 2
+        step.x + step.orientation_length / 2
       ]"
     >
       <!-- True Cargo Box -->
@@ -15,7 +15,7 @@
         @pointer-enter="(e) => onHover(e, step)"
         @pointer-leave="onLeave"
       >
-        <TresBoxGeometry :args="[step.orientation_length, step.orientation_height, step.orientation_width]" />
+        <TresBoxGeometry :args="[step.orientation_width, step.orientation_height, step.orientation_length]" />
         <TresMeshStandardMaterial
           :color="boxColor(step)"
           :emissive="boxEmissive(step)"
@@ -26,16 +26,17 @@
 
         <!-- Edge outline for selected/highlighted items -->
         <TresLineSegments :visible="isHighlighted(step) || isSelected(step)">
-          <TresEdgesGeometry :args="[new THREE.BoxGeometry(step.orientation_length, step.orientation_height, step.orientation_width)]" />
+          <TresEdgesGeometry>
+            <TresBoxGeometry :args="[step.orientation_width, step.orientation_height, step.orientation_length]" />
+          </TresEdgesGeometry>
           <TresLineBasicMaterial :color="isHighlighted(step) ? '#60a5fa' : '#ffffff'" :linewidth="2" />
         </TresLineSegments>
       </TresMesh>
 
-      <!-- Physical Ghost Dunnage Struts -->
       <TresGroup
         v-for="(strut, i) in getDunnageStruts(step)"
         :key="'dunnage-' + step.id + '-' + i"
-        :position="[strut.localX, 0, strut.localY]"
+        :position="[strut.localX, 0, strut.localZ]"
       >
         <!-- Wood Pallets -->
         <TresMesh v-if="strut.type === 'pallets'">
@@ -43,7 +44,9 @@
           <TresMeshBasicMaterial color="#8B5A2B" />
         </TresMesh>
         <TresLineSegments v-if="strut.type === 'pallets'">
-          <TresEdgesGeometry :args="[new THREE.BoxGeometry(strut.len, strut.h, strut.w)]" />
+          <TresEdgesGeometry>
+            <TresBoxGeometry :args="[strut.len, strut.h, strut.w]" />
+          </TresEdgesGeometry>
           <TresLineBasicMaterial color="#3E2723" :linewidth="2" />
         </TresLineSegments>
 
@@ -55,12 +58,12 @@
 
         <!-- Load Bar -->
         <TresGroup v-if="strut.type === 'loadbar'">
-          <TresMesh :position="[0, strut.h/3, 0]" :rotation="strut.axis === 'y' ? [Math.PI/2, 0, 0] : [0, 0, Math.PI/2]">
-            <TresCylinderGeometry :args="[2, 2, strut.axis === 'y' ? strut.w : strut.len, 8]" />
+          <TresMesh :position="[0, strut.h/3, 0]" :rotation="strut.axis === 'y' ? [0, 0, Math.PI/2] : [Math.PI/2, 0, 0]">
+            <TresCylinderGeometry :args="[2, 2, strut.axis === 'y' ? strut.len : strut.w, 8]" />
             <TresMeshStandardMaterial color="#94A3B8" metalness="0.8" roughness="0.2" />
           </TresMesh>
-          <TresMesh :position="[0, -strut.h/3, 0]" :rotation="strut.axis === 'y' ? [Math.PI/2, 0, 0] : [0, 0, Math.PI/2]">
-            <TresCylinderGeometry :args="[2, 2, strut.axis === 'y' ? strut.w : strut.len, 8]" />
+          <TresMesh :position="[0, -strut.h/3, 0]" :rotation="strut.axis === 'y' ? [0, 0, Math.PI/2] : [Math.PI/2, 0, 0]">
+            <TresCylinderGeometry :args="[2, 2, strut.axis === 'y' ? strut.len : strut.w, 8]" />
             <TresMeshStandardMaterial color="#94A3B8" metalness="0.8" roughness="0.2" />
           </TresMesh>
         </TresGroup>
@@ -102,22 +105,26 @@ function getDunnageStruts(step) {
     else if (dStr.includes('Load Bar')) type = 'loadbar'
     else if (dStr.includes('Airbag')) type = 'airbag'
     
-    let localX = 0, localY = 0
-    let len = step.orientation_length * 0.8
-    let w = gap
+    let localX = 0, localZ = 0
+    let len = 0, w = 0
     
     if (axis === 'y') {
-      localY = dir === -1 ? -(step.orientation_width / 2) - (gap / 2) : (step.orientation_width / 2) + (gap / 2)
-    } else {
-      localX = dir === -1 ? -(step.orientation_length / 2) - (gap / 2) : (step.orientation_length / 2) + (gap / 2)
+      // Lateral gap (left/right) -> Offset on X axis
+      localX = dir === -1 ? -(step.orientation_width / 2) - (gap / 2) : (step.orientation_width / 2) + (gap / 2)
       len = gap
-      w = step.orientation_width * 0.8
+      w = step.orientation_length * 0.8
+    } else {
+      // Depth gap (front/back) -> Offset on Z axis
+      localZ = dir === -1 ? -(step.orientation_length / 2) - (gap / 2) : (step.orientation_length / 2) + (gap / 2)
+      len = step.orientation_width * 0.8
+      w = gap
     }
     
     return {
       type,
       localX,
-      localY,
+      localY: 0,
+      localZ,
       len,
       w,
       h: step.orientation_height * 0.6,
