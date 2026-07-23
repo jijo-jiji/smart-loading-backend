@@ -144,10 +144,13 @@ onLoop(() => {
   camera.position.lerp(cameraTarget, 0.06)
 
   if (controlsRef.value) {
-    controlsRef.value.target.lerp(lookTarget, 0.06)
-    controlsRef.value.update()
+    const controls = controlsRef.value.value || controlsRef.value
+    if (controls && controls.target) {
+      controls.target.lerp(lookTarget, 0.06)
+      controls.update()
+    }
   } else {
-    // Operator mode: no controls, manually look at target
+    // Operator mode fallback: no controls, manually look at target
     camera.lookAt(lookTarget)
   }
 
