@@ -203,8 +203,8 @@ watch(() => store.currentSteps, (newSteps) => {
     w: step.orientation_width / 100,  // lateral size
     l: step.orientation_length / 100, // depth size
     h: step.orientation_height / 100, // vertical size
-    weight: 0, // Placeholder
-    material_class: 'INERT'
+    weight: step.cargo_items?.weight || 0,
+    material_class: (step.cargo_items?.is_fragile === 1) ? 'FRAGILE' : 'INERT'
   }))
   
   // Also load rejection data

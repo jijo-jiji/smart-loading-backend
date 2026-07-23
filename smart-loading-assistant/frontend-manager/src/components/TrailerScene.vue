@@ -1,20 +1,19 @@
 <template>
   <div class="w-full h-full relative bg-gray-900">
     <TresCanvas clear-color="#111827" shadows>
-      <TresOrthographicCamera
+      <TresPerspectiveCamera
         ref="cameraRef"
-        :position="[0, 20, 0]"
-        :zoom="20"
+        :position="[store.trailer.width / 2, 10, store.trailer.length + 15]"
         :look-at="[store.trailer.width / 2, 0, store.trailer.length / 2]"
       />
       
       <!-- Constrained Panning/Zooming -->
       <MapControls 
-        :enableRotate="false"
+        :enableRotate="true"
         :enableDamping="true"
         :dampingFactor="0.05"
-        :minZoom="10"
-        :maxZoom="200"
+        :minDistance="2"
+        :maxDistance="50"
       />
 
       <TresAmbientLight :intensity="1" />
