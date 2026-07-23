@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+env/
+.env
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+.env.local
+
+# Flutter
+.dart_tool/
+build/
+.pub-cache/
+.packages
+
+# DB
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
