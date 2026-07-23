@@ -17,7 +17,8 @@ from contextlib import asynccontextmanager
 from app.sheets_integration import append_to_sheets, clear_sheets
 
 DB_PATH = os.getenv("DB_PATH", "smart_loading.db")
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,https://smart-loading-dashboard.netlify.app").split(",")
+_env_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+ALLOWED_ORIGINS = list(set(_env_origins + ["https://smart-loading-dashboard.netlify.app", "https://smart-loading-backend.netlify.app"]))
 API_KEY = os.getenv("API_KEY", "unikl_demo_secret_2026")
 api_key_header = APIKeyHeader(name="X-API-KEY", auto_error=True)
 
