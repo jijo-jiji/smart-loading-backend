@@ -19,9 +19,9 @@
       <TresAmbientLight :intensity="1" />
       <TresDirectionalLight :position="[10, 20, 10]" :intensity="1" cast-shadow />
 
-      <!-- Trailer Floor Wireframe -->
+      <!-- Trailer Floor Grid -->
       <TresMesh :position="[store.trailer.width / 2, -0.01, store.trailer.length / 2]" :rotation="[-Math.PI / 2, 0, 0]">
-        <TresPlaneGeometry :args="[store.trailer.width, store.trailer.length]" />
+        <TresPlaneGeometry :args="[store.trailer.width, store.trailer.length, Math.ceil(store.trailer.width), Math.ceil(store.trailer.length)]" />
         <TresMeshBasicMaterial color="#374151" wireframe />
       </TresMesh>
 
