@@ -100,25 +100,6 @@
                 <option value="material">Material Textures</option>
               </select>
             </div>
-            
-            <div class="hud-center">
-              <label class="hud-label">Temporal Scrubber</label>
-              <input 
-                type="range" 
-                min="0" 
-                :max="transStore.loadingSequence.length - 1" 
-                v-model="transStore.scrubberIndex" 
-                class="hud-slider" 
-              />
-              <div class="scrubber-ticks">
-                <div 
-                  v-for="y in transStore.yAxisLayers" 
-                  :key="y" 
-                  class="tick"
-                  :title="'Layer at Y=' + y"
-                ></div>
-              </div>
-            </div>
           </div>
           
           <TrailerScene />

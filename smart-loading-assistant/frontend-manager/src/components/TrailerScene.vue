@@ -7,9 +7,8 @@
         :look-at="[store.trailer.width / 2, 0, store.trailer.length / 2]"
       />
       
-      <!-- Constrained Panning/Zooming -->
-      <MapControls 
-        :enableRotate="true"
+      <!-- Orbit Controls -->
+      <OrbitControls 
         :enableDamping="true"
         :dampingFactor="0.05"
         :minDistance="2"
@@ -33,7 +32,7 @@
         <!-- Cargo Boxes and Dunnage -->
         <CargoMesh
           v-if="loadingStore.currentSteps.length"
-          :steps="visibleSteps"
+          :steps="loadingStore.currentSteps"
           :highlight-id="store.selectedRejection"
         />
 
@@ -63,7 +62,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { MapControls } from '@tresjs/cientos'
+import { OrbitControls } from '@tresjs/cientos'
 import { useTransshipmentStore } from '../stores/useTransshipmentStore'
 import { useLoadingStore } from '../stores/useLoadingStore'
 import TruckContainer from './scene/TruckContainer.vue'
@@ -72,10 +71,6 @@ import CargoMesh from './scene/CargoMesh.vue'
 const store = useTransshipmentStore()
 const loadingStore = useLoadingStore()
 const cameraRef = ref(null)
-
-const visibleSteps = computed(() => {
-  return loadingStore.currentSteps.slice(0, store.scrubberIndex + 1)
-})
 
 const isCollisionTarget = (trackingId) => {
   if (!store.selectedRejection) return false
