@@ -27,6 +27,56 @@ def verify_api_key(api_key_header_val: str = Security(api_key_header)):
         raise HTTPException(status_code=401, detail="Invalid API Key")
     return api_key_header_val
 
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from passlib.context import CryptContext
+from jose import JWTError, jwt
+
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 120
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.datetime.utcnow() + datetime.timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT username FROM users WHERE username = ?", (username,))
+    user = c.fetchone()
+    conn.close()
+    if user is None:
+        raise credentials_exception
+    return user[0]
+
 # Process pool for CPU-bound spatial math bypassing the GIL
 spatial_process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=2)
 
@@ -37,7 +87,9 @@ class ManifestCargoItem(BaseModel):
     width: float
     height: float
     max_load_bearing: float = float('inf')
+    is_hazardous: bool = False
     material_class: Optional[str] = "INERT"
+    required_temperature: Optional[str] = None
 
 class TrailerConstraintsRequest(BaseModel):
     length: float
@@ -117,10 +169,35 @@ def init_db():
         )
     """)
     c.execute("""
-        CREATE TABLE IF NOT EXISTS cargo_items (
-            id TEXT PRIMARY KEY, manifest_id TEXT, label TEXT, length REAL, width REAL, height REAL, weight REAL, is_fragile INTEGER, max_load_bearing REAL
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            hashed_password TEXT
         )
     """)
+    
+    c.execute("SELECT COUNT(*) FROM users")
+    if c.fetchone()[0] == 0:
+        admin_user = os.getenv("ADMIN_USERNAME", "admin")
+        admin_pass = os.getenv("ADMIN_PASSWORD", "password123")
+        hashed_pass = get_password_hash(admin_pass)
+        c.execute("INSERT INTO users (username, hashed_password) VALUES (?, ?)", (admin_user, hashed_pass))
+        
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS cargo_items (
+            id TEXT PRIMARY KEY, manifest_id TEXT, label TEXT, length REAL, width REAL, height REAL, weight REAL, is_fragile INTEGER, max_load_bearing REAL, is_hazardous INTEGER DEFAULT 0, required_temperature TEXT
+        )
+    """)
+    
+    # Safe migration using PRAGMA table_info
+    c.execute("PRAGMA table_info(cargo_items)")
+    columns = [col[1] for col in c.fetchall()]
+    
+    if 'is_hazardous' not in columns:
+        c.execute("ALTER TABLE cargo_items ADD COLUMN is_hazardous INTEGER DEFAULT 0")
+        
+    if 'required_temperature' not in columns:
+        c.execute("ALTER TABLE cargo_items ADD COLUMN required_temperature TEXT")
     c.execute("""
         CREATE TABLE IF NOT EXISTS loading_plans (
             id TEXT PRIMARY KEY,
@@ -281,10 +358,17 @@ class CargoItem(BaseModel):
     weight: float
     is_fragile: bool
     max_load_bearing: float = 10000.0 # Default structural limit
+    required_temperature: Optional[str] = None
+
+class OperationalConfig(BaseModel):
+    base_handling_sec: int = Field(default=120, gt=0)
+    rotation_penalty_sec: int = Field(default=30, ge=0)
+    z_axis_penalty_sec: int = Field(default=90, ge=0)
 
 class PackingRequest(BaseModel):
     truck: Truck
     cargo: List[CargoItem]
+    config: OperationalConfig = Field(default_factory=OperationalConfig)
 
 class Coordinate(BaseModel):
     x: float
@@ -310,6 +394,11 @@ class PackedItem(BaseModel):
     gap_front_cm: float = 0.0
     gap_back_cm: float = 0.0
 
+class AnalyticsData(BaseModel):
+    total_eta_seconds: int
+    total_items_packed: int
+    handling_complexity_score: float
+
 class PackingResponse(BaseModel):
     status: str
     rejection_reason: Optional[str] = None
@@ -318,6 +407,7 @@ class PackingResponse(BaseModel):
     left_weight: float
     right_weight: float
     payload_cg: Optional[Coordinate] = None
+    analytics: Optional[AnalyticsData] = None
 
 # --- Core Algorithm ---
 def get_extreme_points(packed_items: List[PackedItem], truck_l: float, truck_w: float, truck_h: float) -> List[Coordinate]:
@@ -394,6 +484,14 @@ def apply_dunnage_rules(gap: float, anchor: str) -> str:
             elif rem <= 30.0: parts.append("Woven Airbag")
         return ", ".join(parts)
 
+def calculate_item_eta(item, best_point, is_rotated, config: OperationalConfig) -> int:
+    eta = config.base_handling_sec
+    if is_rotated:
+        eta += config.rotation_penalty_sec
+    if best_point.z > 0:
+        eta += config.z_axis_penalty_sec
+    return eta
+
 def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_token: str = None) -> PackingResponse:
     pending_items = sorted(request.cargo, key=lambda item: item.weight, reverse=True)
     item_map = {item.id: item for item in request.cargo}
@@ -403,8 +501,12 @@ def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_tok
     truck_w = round(request.truck.width, 4)
     truck_h = round(request.truck.height, 4)
     
-    left_weight, right_weight = 0.0, 0.0
+    left_axle_weight, right_axle_weight = 0.0, 0.0
     sequence_counter = 1
+    
+    total_eta_seconds = 0
+    total_items_packed = 0
+    complex_handling_score = 0
     
     cluster_mass = 0.0
     cluster_packed_items = []
@@ -512,10 +614,11 @@ def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_tok
                     if best_point: break
                 
                 if not best_point:
-                    return PackingResponse(status="FAILED", packed_items=packed_items, unpacked_ids=[i.id for i in pending_items], left_weight=left_weight, right_weight=right_weight, payload_cg=None)
+                    return PackingResponse(status="SUCCESS", packed_items=packed_items, unpacked_ids=[], left_axle_weight=left_axle_weight, right_axle_weight=right_axle_weight, payload_cg=None)
                 force_anchor_id = None
                 
             else:
+                seek_y_max = right_axle_weight < left_axle_weight
                 eps = get_extreme_points(packed_items, truck_l, truck_w, truck_h)
                 if seek_y_max:
                     eps.sort(key=lambda p: (p.z, -p.y, p.x))
@@ -611,11 +714,11 @@ def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_tok
                 l, original_w, h = best_orientation
                 w_effective = original_w + best_margin
                 
-                midline = truck_w / 2.0
-                left_portion = max(0.0, min(midline - best_point.y, w_effective))
-                right_portion = max(0.0, min((best_point.y + w_effective) - midline, w_effective))
-                left_weight += item.weight * (left_portion / w_effective)
-                right_weight += item.weight * (right_portion / w_effective)
+                centroid_y = best_point.y + (w_effective / 2.0)
+                left_load = item.weight * ((truck_w - centroid_y) / truck_w)
+                right_load = item.weight * (centroid_y / truck_w)
+                left_axle_weight += left_load
+                right_axle_weight += right_load
                 
                 new_packed = PackedItem(
                     id=item.id, coordinates=best_point, rotated=best_rotated, step_sequence=sequence_counter,
@@ -670,6 +773,18 @@ def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_tok
                 cluster_packed_items.append(new_packed)
                 cluster_mass += item.weight
                 
+                # Update ETA and HCS scores
+                item_eta = calculate_item_eta(item, best_point, best_rotated, request.config)
+                total_eta_seconds += item_eta
+                total_items_packed += 1
+                
+                item_complexity_weight = 0
+                if best_rotated:
+                    item_complexity_weight += request.config.rotation_penalty_sec
+                if best_point.z > 0:
+                    item_complexity_weight += request.config.z_axis_penalty_sec
+                complex_handling_score += item_complexity_weight
+                
                 sequence_counter += 1
                 pending_items.remove(item)
                 placed_any = True
@@ -691,13 +806,14 @@ def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_tok
                         cluster_packed_items = []
                         seek_y_max = True
                         # Recalculate weights
-                        left_weight, right_weight = 0.0, 0.0
+                        left_axle_weight, right_axle_weight = 0.0, 0.0
                         for pi in packed_items:
                             w_eff = pi.orientation_width + pi.dunnage_margin
-                            left_p = max(0.0, min(midline - pi.coordinates.y, w_eff))
-                            right_p = max(0.0, min((pi.coordinates.y + w_eff) - midline, w_eff))
-                            left_weight += item_map[pi.id].weight * (left_p / w_eff)
-                            right_weight += item_map[pi.id].weight * (right_p / w_eff)
+                            centroid_y = pi.coordinates.y + (w_eff / 2.0)
+                            left_load = item_map[pi.id].weight * ((truck_w - centroid_y) / truck_w)
+                            right_load = item_map[pi.id].weight * (centroid_y / truck_w)
+                            left_axle_weight += left_load
+                            right_axle_weight += right_load
                         # Sort pending items again
                         pending_items = sorted(pending_items, key=lambda i: i.weight, reverse=True)
                         placed_any = True
@@ -715,13 +831,14 @@ def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_tok
                         cluster_packed_items = []
                         seek_y_max = False # Reset heuristic
                         
-                        left_weight, right_weight = 0.0, 0.0
+                        left_axle_weight, right_axle_weight = 0.0, 0.0
                         for pi in packed_items:
                             w_eff = pi.orientation_width + pi.dunnage_margin
-                            left_p = max(0.0, min(midline - pi.coordinates.y, w_eff))
-                            right_p = max(0.0, min((pi.coordinates.y + w_eff) - midline, w_eff))
-                            left_weight += item_map[pi.id].weight * (left_p / w_eff)
-                            right_weight += item_map[pi.id].weight * (right_p / w_eff)
+                            centroid_y = pi.coordinates.y + (w_eff / 2.0)
+                            left_load = item_map[pi.id].weight * ((truck_w - centroid_y) / truck_w)
+                            right_load = item_map[pi.id].weight * (centroid_y / truck_w)
+                            left_axle_weight += left_load
+                            right_axle_weight += right_load
                             
                         pending_items = sorted(pending_items, key=lambda i: (i.id == force_anchor_id, i.weight), reverse=True)
                         placed_any = True
@@ -842,19 +959,32 @@ def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_tok
         cg_y = sum((pi.coordinates.y + (pi.orientation_width + pi.dunnage_margin)/2.0) * item_map[pi.id].weight for pi in packed_items) / total_packed_weight
         cg_z = sum((pi.coordinates.z + pi.orientation_height/2.0) * item_map[pi.id].weight for pi in packed_items) / total_packed_weight
         payload_cg = Coordinate(x=cg_x, y=cg_y, z=cg_z)
+    max_possible_complexity = (request.config.rotation_penalty_sec + request.config.z_axis_penalty_sec) * total_items_packed
+    hcs = (complex_handling_score / max_possible_complexity * 100) if max_possible_complexity > 0 else 0.0
+    
+    analytics_data = AnalyticsData(
+        total_eta_seconds=total_eta_seconds,
+        total_items_packed=total_items_packed,
+        handling_complexity_score=round(hcs, 2)
+    )
     
     return PackingResponse(
         status=status,
         rejection_reason=rejection_reason,
         packed_items=packed_items,
         unpacked_ids=unpacked_ids,
-        left_weight=left_weight,
-        right_weight=right_weight,
-        payload_cg=payload_cg
+        left_weight=left_axle_weight,
+        right_weight=right_axle_weight,
+        payload_cg=payload_cg,
+        analytics=analytics_data
     )
 
 @app.post("/api/v1/optimize", response_model=PackingResponse, dependencies=[Depends(verify_api_key)])
 def optimize_packing(request: PackingRequest, degraded_mode: bool = False):
+    for item in request.cargo:
+        if item.length > request.truck.length or item.width > request.truck.width or item.height > request.truck.height:
+            raise HTTPException(status_code=422, detail=f"Dimensional Overflow: Item {item.id} exceeds maximum truck boundaries.")
+
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     lock_token = str(uuid.uuid4())
@@ -894,7 +1024,28 @@ def optimize_packing(request: PackingRequest, degraded_mode: bool = False):
         conn.commit()
         conn.close()
 
-@app.get("/api/v1/plans", dependencies=[Depends(verify_api_key)])
+@app.post("/api/auth/login")
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT hashed_password FROM users WHERE username = ?", (form_data.username,))
+    user = c.fetchone()
+    conn.close()
+    
+    if not user or not verify_password(form_data.password, user[0]):
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        
+    access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": form_data.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/api/v1/plans", dependencies=[Depends(get_current_user)])
 def get_plans():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -911,7 +1062,7 @@ def get_plans():
     conn.close()
     return plans
 
-@app.get("/api/v1/plans/{plan_id}/steps", dependencies=[Depends(verify_api_key)])
+@app.get("/api/v1/plans/{plan_id}/steps", dependencies=[Depends(get_current_user)])
 def get_steps(plan_id: str):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -926,7 +1077,7 @@ def get_steps(plan_id: str):
     conn.close()
     return steps
 
-@app.post("/api/v1/plans/{plan_id}/push-sheets", dependencies=[Depends(verify_api_key)])
+@app.post("/api/v1/plans/{plan_id}/push-sheets", dependencies=[Depends(get_current_user)])
 def push_to_sheets(plan_id: str):
     """Push a loading plan to Google Sheets. Returns not_configured if env vars are absent."""
     google_creds = os.getenv("GOOGLE_SHEETS_CREDENTIALS")

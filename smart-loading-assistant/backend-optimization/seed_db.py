@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
-SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
+SHEET_ID = os.environ.get("GOOGLE_SHEET_ID") or os.environ.get("CURRENT_SHEET_ID")
 
 from app.main import optimize_packing, PackingRequest, Truck, CargoItem
 
@@ -47,7 +47,7 @@ def seed():
             
             ws_trucks = get_or_create_worksheet(sh, "Trucks", ["id", "name", "length", "width", "height", "max_weight"])
             ws_manifests = get_or_create_worksheet(sh, "Manifests", ["id", "name", "description"])
-            ws_cargo = get_or_create_worksheet(sh, "Cargo Items", ["id", "manifest_id", "label", "length", "width", "height", "weight", "is_fragile"])
+            ws_cargo = get_or_create_worksheet(sh, "Cargo Items", ["id", "manifest_id", "label", "length", "width", "height", "weight", "is_fragile", "required_temperature"])
             ws_plans = get_or_create_worksheet(sh, "Loading Plans", ["id", "truck_id", "manifest_id", "status", "left_weight_kg", "right_weight_kg", "cg_x", "cg_y", "cg_z", "rejection_reason"])
             ws_steps = get_or_create_worksheet(sh, "Loading Plan Steps", [
                 "plan_id", "cargo_item_id", "sequence_number", "x", "y", "z", 
@@ -101,12 +101,37 @@ def seed():
         CargoItem(id=str(uuid.uuid4()), length=100.0, width=50.0, height=120.0, weight=1000.0, is_fragile=False, max_load_bearing=5000.0)
     ]
     
+    # --- TEST CASE 6: The Hazmat Test ---
+    truck6 = Truck(id=str(uuid.uuid4()), length=600.0, width=240.0, height=240.0, max_weight=15000.0)
+    cargo6 = [
+        CargoItem(id=str(uuid.uuid4()), length=120.0, width=100.0, height=100.0, weight=800.0, is_fragile=False, max_load_bearing=5000.0),
+        CargoItem(id=str(uuid.uuid4()), length=120.0, width=100.0, height=100.0, weight=800.0, is_fragile=False, max_load_bearing=5000.0),
+        CargoItem(id=str(uuid.uuid4()), length=120.0, width=100.0, height=100.0, weight=800.0, is_fragile=False, max_load_bearing=5000.0),
+    ]
+    # Inject hazardous flags dynamically using a set to avoid Pydantic strict attribute errors
+    hazardous_ids = {
+        cargo1[1].id,
+        cargo3[0].id,
+        cargo4[0].id,
+        cargo6[0].id,
+        cargo6[1].id,
+    }
+    
+    # Inject cold requirements dynamically
+    cold_requirements = {
+        cargo2[0].id: "-20°C",
+        cargo3[1].id: "2-8°C",
+        cargo6[0].id: "-20°C", # Hazmat AND Cold
+        cargo6[2].id: "Ambient"
+    }
+    
     tests = [
         ("Test 1: The Crush Test", truck1, cargo1),
         ("Test 2: The Tetris Test", truck2, cargo2),
         ("Test 3: The Imbalance Test", truck3, cargo3),
         ("Test 4: The Overflow Rejection", truck4, cargo4),
         ("Test 5: Dunnage Flag Test", truck5, cargo5),
+        ("Test 6: The Hazmat Test", truck6, cargo6),
     ]
     
     for test_name, truck_model, cargo_models in tests:
@@ -125,7 +150,8 @@ def seed():
             cargo_rows = []
             for i, c in enumerate(cargo_models):
                 label = f"ITEM-{i+1} ({c.weight}kg)"
-                cargo_rows.append([c.id, manifest_id, label, c.length, c.width, c.height, c.weight, c.is_fragile])
+                req_temp = cold_requirements.get(c.id, "Ambient")
+                cargo_rows.append([c.id, manifest_id, label, c.length, c.width, c.height, c.weight, c.is_fragile, req_temp])
             ws_cargo.append_rows(cargo_rows)
             
             ws_plans.append_row([
@@ -159,9 +185,13 @@ def seed():
                   (manifest_id, test_name, "Aggressive Crucible Test"))
         
         for i, cargo in enumerate(cargo_models):
+            is_hazmat = 1 if cargo.id in hazardous_ids else 0
+            req_temp = cold_requirements.get(cargo.id, "Ambient")
             label = f"ITEM-{i+1} ({cargo.weight}kg)"
-            c.execute("INSERT OR REPLACE INTO cargo_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-                      (cargo.id, manifest_id, label, cargo.length, cargo.width, cargo.height, cargo.weight, int(cargo.is_fragile), cargo.max_load_bearing))
+            if is_hazmat:
+                label = f"HAZMAT: {label}"
+            c.execute("INSERT OR REPLACE INTO cargo_items (id, manifest_id, label, length, width, height, weight, is_fragile, max_load_bearing, is_hazardous, required_temperature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                      (cargo.id, manifest_id, label, cargo.length, cargo.width, cargo.height, cargo.weight, int(cargo.is_fragile), cargo.max_load_bearing, is_hazmat, req_temp))
             
         # Generate immutable human-readable ID: SHA-256 of UUID → first 8 hex chars
         human_readable_id = 'MAN-' + hashlib.sha256(plan_id.encode()).hexdigest()[:8].upper()
