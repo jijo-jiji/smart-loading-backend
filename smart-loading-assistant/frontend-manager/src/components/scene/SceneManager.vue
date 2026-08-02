@@ -1,7 +1,7 @@
 <template>
   <div class="scene-manager">
     <TresCanvas clear-color="#060d1f">
-      <TresPerspectiveCamera ref="cameraRef" :position="initialCameraPos" :look-at="[0, 0, 0]" />
+      <TresPerspectiveCamera ref="cameraRef" :position="initialCameraPos" :look-at="initialLookAt" />
       <OrbitControls ref="controlsRef" />
       <TresAmbientLight :intensity="0.6" />
       <TresDirectionalLight :position="[800, 1200, 800]" :intensity="1.2" cast-shadow />
@@ -102,7 +102,17 @@ let lerpActive = false
 const ISOMETRIC_OFFSET = new THREE.Vector3(600, 700, 600)
 
 const initialCameraPos = computed(() => {
-  return props.mode === 'operator' ? [600, 700, 600] : [1000, 1000, 1000]
+  if (!store.activePlan) return [0, 600, 1800]
+  const truck = store.activePlan.trucks
+  // [X (width center), Y (default_height), Z (outside rear doors)]
+  return [truck.width / 2, 600, truck.length + 800]
+})
+
+const initialLookAt = computed(() => {
+  if (!store.activePlan) return [0, 0, 0]
+  const truck = store.activePlan.trucks
+  // [X (width center), Y (floor_level), Z (center of bed)]
+  return [truck.width / 2, 0, truck.length / 2]
 })
 
 const visibleSteps = computed(() => {

@@ -1,0 +1,29 @@
+{
+  "truck": {
+    "id": "t1",
+    "length": 600.0,
+    "width": 240.0,
+    "height": 240.0,
+    "max_weight": 15000.0,
+    "suspension_type": "STANDARD",
+    "requires_maintenance": true
+  },
+  "cargo": [
+    {
+      "id": "c1",
+      "length": 100.0,
+      "width": 100.0,
+      "height": 100.0,
+      "weight": 500.0,
+      "is_fragile": false,
+      "max_load_bearing": 10000.0,
+      "required_temperature": null,
+      "is_hazardous": 0
+    }
+  ],
+  "config": {
+    "base_handling_sec": 120,
+    "rotation_penalty_sec": 30,
+    "z_axis_penalty_sec": 90
+  }
+}

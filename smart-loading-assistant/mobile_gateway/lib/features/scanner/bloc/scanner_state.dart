@@ -7,12 +7,32 @@ abstract class ScannerState extends Equatable {
   List<Object?> get props => [];
 }
 
-class ScannerInitial extends ScannerState {}
-class ScannerProcessing extends ScannerState {}
-class ScannerSuccess extends ScannerState {}
-class ScannerFailure extends ScannerState {
-  final String reason;
-  const ScannerFailure(this.reason);
+class ScanningState extends ScannerState {}
+
+class DebounceState extends ScannerState {}
+
+class ResolutionState extends ScannerState {
+  final String trackingId;
+  final String instruction;
+  final bool isHazardous;
+
+  const ResolutionState({
+    required this.trackingId,
+    required this.instruction,
+    required this.isHazardous,
+  });
+
   @override
-  List<Object?> get props => [reason];
+  List<Object?> get props => [trackingId, instruction, isHazardous];
 }
+
+class AmberAlertState extends ScannerState {
+  final String trackingId;
+
+  const AmberAlertState(this.trackingId);
+
+  @override
+  List<Object?> get props => [trackingId];
+}
+
+class QuarantineState extends ScannerState {}

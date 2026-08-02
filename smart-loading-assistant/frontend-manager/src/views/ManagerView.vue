@@ -40,7 +40,14 @@
       </div>
     </Transition>
 
-    <div class="main-body">
+    <div class="flex flex-col md:flex-row flex-1 overflow-hidden">
+      
+      <!-- API Error Banner -->
+      <div v-if="apiErrorBanner" class="absolute top-20 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-4 rounded shadow-2xl">
+        <strong>API Error:</strong> {{ apiErrorBanner }}
+        <button @click="apiErrorBanner = null" class="ml-4 underline">Dismiss</button>
+      </div>
+
       <!-- Left Sidebar: Manifest Selector -->
       <aside class="left-sidebar">
         <div class="sidebar-header">
@@ -103,12 +110,88 @@
           </div>
           
           <TrailerScene />
+          <CargoTelemetryPanel />
         </template>
       </main>
 
       <!-- Right Sidebar: KPIs & Left Behind -->
       <aside class="right-sidebar" v-if="store.activePlan">
         <KpiPanel />
+        
+        <!-- Advanced Settings & Analytics (Phase 3) -->
+        <div class="analytics-container" style="padding: 16px; border-top: 1px solid rgba(148,163,184,0.1);">
+          <button 
+            @click="showAdvancedSettings = !showAdvancedSettings" 
+            style="color: #60a5fa; font-size: 13px; font-weight: 600; background: none; border: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 0;"
+          >
+            <span>{{ showAdvancedSettings ? '▼' : '▶' }}</span> 
+            Advanced Operational Settings
+          </button>
+          
+          <div v-show="showAdvancedSettings" style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+            <label style="font-size: 11px; color: #94a3b8; display: flex; flex-direction: column;">
+              Base Handling (sec)
+              <input type="number" v-model.number="operationalConfig.base_handling_sec" min="1" style="background: rgba(15,23,42,0.5); border: 1px solid rgba(148,163,184,0.2); color: white; padding: 4px; border-radius: 4px; margin-top: 4px;" />
+            </label>
+            <label style="font-size: 11px; color: #94a3b8; display: flex; flex-direction: column;">
+              Rotation Penalty (sec)
+              <input type="number" v-model.number="operationalConfig.rotation_penalty_sec" min="0" style="background: rgba(15,23,42,0.5); border: 1px solid rgba(148,163,184,0.2); color: white; padding: 4px; border-radius: 4px; margin-top: 4px;" />
+            </label>
+            <label style="font-size: 11px; color: #94a3b8; display: flex; flex-direction: column;">
+              Z-Axis Stack Penalty (sec)
+              <input type="number" v-model.number="operationalConfig.z_axis_penalty_sec" min="0" style="background: rgba(15,23,42,0.5); border: 1px solid rgba(148,163,184,0.2); color: white; padding: 4px; border-radius: 4px; margin-top: 4px;" />
+            </label>
+          </div>
+
+          <button 
+            @click="calculateEfficiency" 
+            :disabled="isOptimizing"
+            style="margin-top: 16px; width: 100%; padding: 8px; background: #3b82f6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;"
+          >
+            {{ isOptimizing ? 'Calculating...' : 'Calculate Efficiency' }}
+          </button>
+          
+          <button 
+            v-if="physicsStore.analytics"
+            @click="showOptimizationSummary = true" 
+            style="margin-top: 8px; width: 100%; padding: 8px; background: rgba(59, 130, 246, 0.1); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; font-weight: 600; cursor: pointer;"
+          >
+            📋 AI Optimization Summary
+          </button>
+
+          <div v-if="physicsStore.analytics" style="margin-top: 16px; padding: 12px; background: rgba(30,41,59,0.8); border: 1px solid rgba(148,163,184,0.2); border-radius: 8px; position: relative;">
+            <div v-if="physicsStore.isStale" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15,23,42,0.8); backdrop-filter: blur(2px); display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 8px; z-index: 10;">
+              <span style="font-size: 24px; margin-bottom: 4px;">⚠️</span>
+              <span style="color: #ef4444; font-weight: 700; font-size: 11px; text-transform: uppercase;">Manifest Mutated</span>
+              <span style="color: #94a3b8; font-size: 10px;">Recalculate to verify safety</span>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+              <h4 style="font-size: 12px; color: #cbd5e1; margin: 0; font-weight: 700; text-transform: uppercase;">Projected Efficiency</h4>
+              <div :style="{ 
+                padding: '2px 6px', 
+                borderRadius: '4px', 
+                fontSize: '9px', 
+                fontWeight: '800',
+                background: physicsStore.isSafe ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                color: physicsStore.isSafe ? '#4ade80' : '#ef4444',
+                border: physicsStore.isSafe ? '1px solid rgba(34,197,94,0.2)' : '1px solid rgba(239,68,68,0.2)'
+              }">
+                {{ physicsStore.isSafe ? 'CG SAFE' : 'CG DANGER' }}
+              </div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+              <div>
+                <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase;">Loading ETA</div>
+                <div style="font-size: 18px; color: #60a5fa; font-family: monospace; font-weight: 700;">{{ formattedETA }}</div>
+              </div>
+              <div>
+                <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase;">Complexity (HCS)</div>
+                <div style="font-size: 18px; color: #facc15; font-family: monospace; font-weight: 700;">{{ physicsStore.analytics.handling_complexity_score }}%</div>
+              </div>
+            </div>
+          </div>
+        </div>
         
         <!-- Phase III.b Inspector Mode -->
         <div class="left-behind-panel" v-if="transStore.leftBehind.length > 0">
@@ -135,6 +218,12 @@
         </div>
       </aside>
     </div>
+    
+    <!-- Modals -->
+    <FleetOptimizationSummaryModal 
+      v-if="showOptimizationSummary" 
+      @close="showOptimizationSummary = false" 
+    />
   </div>
 </template>
 <script setup>
@@ -144,12 +233,82 @@ import { useLoadingStore } from '../stores/useLoadingStore'
 import { useTransshipmentStore } from '../stores/useTransshipmentStore'
 import TrailerScene from '../components/TrailerScene.vue'
 import KpiPanel from '../components/ui/KpiPanel.vue'
+import CargoTelemetryPanel from '../components/ui/CargoTelemetryPanel.vue'
+import FleetOptimizationSummaryModal from '../components/ui/FleetOptimizationSummaryModal.vue'
+import { optimizePlan } from '../api/loadingPlans'
+import { usePhysicsStore } from '../stores/usePhysicsStore'
 
 const store = useLoadingStore()
 const transStore = useTransshipmentStore()
+const physicsStore = usePhysicsStore()
 const searchQuery = ref('')
 const sheetsLoading = ref(false)
 const sheetsToast = ref(null)
+const apiErrorBanner = ref(null)
+
+const showAdvancedSettings = ref(false)
+const operationalConfig = ref({
+  base_handling_sec: 120,
+  rotation_penalty_sec: 30,
+  z_axis_penalty_sec: 90
+})
+const isOptimizing = ref(false)
+const showOptimizationSummary = ref(false)
+
+// Active watcher to enforce Cache Invalidation
+watch(() => store.currentSteps, (newSteps) => {
+  if (!newSteps || newSteps.length === 0) return
+  const currentManifest = newSteps.map(step => step.cargo_items)
+  physicsStore.validateCache(currentManifest)
+}, { deep: true })
+
+const formattedETA = computed(() => {
+  if (!physicsStore.analytics) return '0h 0m'
+  const totalSeconds = physicsStore.analytics.total_eta_seconds
+  
+  // Convert total to minutes, and mathematically round to the nearest whole minute
+  const totalMinutesRounded = Math.round(totalSeconds / 60)
+  
+  const hours = Math.floor(totalMinutesRounded / 60)
+  const minutes = totalMinutesRounded % 60
+  
+  return `${hours}h ${minutes}m`
+})
+
+const calculateEfficiency = async () => {
+  if (!store.activePlan || !store.currentSteps.length) return
+  isOptimizing.value = true
+  
+  const manifest = store.currentSteps.map(step => step.cargo_items)
+  // Simulate fleet management API: Check maintenance schedule
+  const truckData = { ...store.activePlan.trucks }
+  // We simulate the flag being true for demonstration of the data pipeline
+  truckData.requires_maintenance = true
+  
+  const payload = {
+    truck: truckData,
+    cargo: manifest
+  }
+  
+  if (showAdvancedSettings.value) {
+    payload.config = operationalConfig.value
+  }
+  
+  try {
+    apiErrorBanner.value = null
+    const data = await optimizePlan(payload)
+    if (data && data.analytics) {
+      physicsStore.setOptimization(data, physicsStore.generateManifestHash(manifest))
+    } else {
+      apiErrorBanner.value = JSON.stringify(data)
+    }
+  } catch (err) {
+    console.error("Optimization failed:", err)
+    apiErrorBanner.value = err.message || JSON.stringify(err)
+  } finally {
+    isOptimizing.value = false
+  }
+}
 
 onMounted(() => {
   store.startPolling()

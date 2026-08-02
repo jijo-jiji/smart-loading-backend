@@ -78,11 +78,27 @@
         These codes contain valid 64-character cryptographic tracking hashes required by the system.
     </p>
 
+    <div class="truck-section">
+        <div class="label">Truck Assignment</div>
+        <div id="truck-qr" class="qrcode" style="background: #1f2937;"></div>
+    </div>
+
     <div class="grid" id="qr-grid"></div>
 
     <script>
+        // Generate Truck QR
+        const truckQr = new QRCode(document.getElementById("truck-qr"), {
+            text: "DEV_PLAN_001",
+            width: 256,
+            height: 256,
+            colorDark : "#22c55e", 
+            colorLight : "#1f2937",
+            correctLevel : QRCode.CorrectLevel.H
+        });
+
         // Generate 6 valid 64-character hashes for the demo
         const demoItems = [
+            { label: "Operator Badge - John Doe", hash: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcGVyYXRvcl9pZCI6IkRFVl9PUEVSQVRPUl8wMDEiLCJleHAiOjQwNzA5MDg4MDAsImNsZWFyYW5jZV9sZXZlbCI6NX0.SSFVfTVRp-sCVi8gMfHKtZc41u0xSTar0lSxrzHsntM" },
             { label: "Pallet 1 - Heavy Machinery", hash: "9b3c4f8d2e1a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2" },
             { label: "Pallet 2 - Fragile Electronics", hash: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2" },
             { label: "Pallet 3 - Standard Cargo", hash: "f1e2d3c4b5a69f8e7d6c5b4a39f2e1d0c9b8a7f6e5d4c3b2a19f8e7d6c5b4a3" },

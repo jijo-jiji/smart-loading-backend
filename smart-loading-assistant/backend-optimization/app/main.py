@@ -130,6 +130,14 @@ def init_db():
         )
     """)
     c.execute("""
+        CREATE TABLE IF NOT EXISTS overflow_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cargo_id TEXT,
+            reason TEXT,
+            timestamp TEXT
+        )
+    """)
+    c.execute("""
         CREATE TABLE IF NOT EXISTS system_state (
             key TEXT PRIMARY KEY,
             value_int INTEGER,
@@ -198,6 +206,17 @@ def init_db():
         
     if 'required_temperature' not in columns:
         c.execute("ALTER TABLE cargo_items ADD COLUMN required_temperature TEXT")
+    
+    # New compliance & routing columns
+    if 'expected_seal_number' not in columns:
+        c.execute("ALTER TABLE cargo_items ADD COLUMN expected_seal_number TEXT")
+    if 'regulatory_placard_required' not in columns:
+        c.execute("ALTER TABLE cargo_items ADD COLUMN regulatory_placard_required INTEGER DEFAULT 0")
+    if 'drop_stop_number' not in columns:
+        c.execute("ALTER TABLE cargo_items ADD COLUMN drop_stop_number INTEGER DEFAULT 1")
+    if 'destination_zone' not in columns:
+        c.execute("ALTER TABLE cargo_items ADD COLUMN destination_zone TEXT")
+
     c.execute("""
         CREATE TABLE IF NOT EXISTS loading_plans (
             id TEXT PRIMARY KEY,
@@ -211,9 +230,18 @@ def init_db():
             cg_y REAL,
             cg_z REAL,
             rejection_reason TEXT,
+            compromised_at TIMESTAMP,
+            compromised_reason TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    
+    c.execute("PRAGMA table_info(loading_plans)")
+    lp_columns = [col[1] for col in c.fetchall()]
+    if 'compromised_at' not in lp_columns:
+        c.execute("ALTER TABLE loading_plans ADD COLUMN compromised_at TIMESTAMP")
+    if 'compromised_reason' not in lp_columns:
+        c.execute("ALTER TABLE loading_plans ADD COLUMN compromised_reason TEXT")
     c.execute("""
         CREATE TABLE IF NOT EXISTS loading_plan_steps (
             plan_id TEXT, cargo_item_id TEXT, sequence_number INTEGER, x REAL, y REAL, z REAL, orientation_length REAL, orientation_width REAL, orientation_height REAL, requires_dunnage INTEGER, dunnage_margin REAL,
@@ -222,6 +250,25 @@ def init_db():
             PRIMARY KEY (plan_id, cargo_item_id)
         )
     """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS confirmed_pallets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plan_id TEXT,
+            cargo_id TEXT,
+            scanned_at TEXT,
+            operator_id TEXT,
+            verified_seal_number TEXT,
+            sequence_deviation_acknowledged INTEGER DEFAULT 0,
+            scan_method TEXT DEFAULT 'LASER',
+            UNIQUE(plan_id, cargo_id)
+        )
+    """)
+    
+    c.execute("PRAGMA table_info(confirmed_pallets)")
+    cp_columns = [col[1] for col in c.fetchall()]
+    if 'scan_method' not in cp_columns:
+        c.execute("ALTER TABLE confirmed_pallets ADD COLUMN scan_method TEXT DEFAULT 'LASER'")
+
     conn.commit()
     conn.close()
 
@@ -349,6 +396,7 @@ class Truck(BaseModel):
     height: float
     max_weight: float
     suspension_type: str = "STANDARD"
+    requires_maintenance: bool = False
 
 class CargoItem(BaseModel):
     id: str
@@ -359,6 +407,12 @@ class CargoItem(BaseModel):
     is_fragile: bool
     max_load_bearing: float = 10000.0 # Default structural limit
     required_temperature: Optional[str] = None
+    is_hazardous: bool = False
+    sla_priority: int = 0
+    expected_seal_number: Optional[str] = None
+    regulatory_placard_required: bool = False
+    drop_stop_number: int = 1
+    destination_zone: Optional[str] = None
 
 class OperationalConfig(BaseModel):
     base_handling_sec: int = Field(default=120, gt=0)
@@ -394,16 +448,24 @@ class PackedItem(BaseModel):
     gap_front_cm: float = 0.0
     gap_back_cm: float = 0.0
 
+class UnpackedItem(BaseModel):
+    id: str
+    reason: str
+
 class AnalyticsData(BaseModel):
     total_eta_seconds: int
     total_items_packed: int
     handling_complexity_score: float
+    is_safe: bool = True
+    volume_utilization: float = 0.0
+    decision_codes: List[str] = []
+    safety_alerts: List[str] = []
 
 class PackingResponse(BaseModel):
     status: str
     rejection_reason: Optional[str] = None
     packed_items: List[PackedItem]
-    unpacked_ids: List[str]
+    unpacked_items: List[UnpackedItem]
     left_weight: float
     right_weight: float
     payload_cg: Optional[Coordinate] = None
@@ -493,7 +555,7 @@ def calculate_item_eta(item, best_point, is_rotated, config: OperationalConfig) 
     return eta
 
 def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_token: str = None) -> PackingResponse:
-    pending_items = sorted(request.cargo, key=lambda item: item.weight, reverse=True)
+    pending_items = sorted(request.cargo, key=lambda item: (-item.drop_stop_number, -item.sla_priority, -item.weight), reverse=True)
     item_map = {item.id: item for item in request.cargo}
     
     packed_items = []
@@ -508,6 +570,7 @@ def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_tok
     total_items_packed = 0
     complex_handling_score = 0
     
+    unpacked_items = []
     cluster_mass = 0.0
     cluster_packed_items = []
     seek_y_max = False
@@ -521,11 +584,13 @@ def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_tok
             c.execute("UPDATE system_locks SET locked_at = CURRENT_TIMESTAMP WHERE id = 'packing_loop' AND lock_owner = ?", (lock_token,))
             conn.commit()
             conn.close()
+            cluster_mass = 0.0
             last_heartbeat = time.time()
             
         placed_any = False
         
         for item in pending_items.copy():
+            item_failure_reason = "VOLUME_EXHAUSTED"
             best_point = None
             best_orientation = None
             best_rotated = False
@@ -696,6 +761,40 @@ def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_tok
                         if crushes_fragile: continue
                             
                         if sum(item_map[pi.id].weight for pi in packed_items) + item.weight > request.truck.max_weight:
+                            item_failure_reason = "GROSS_WEIGHT_EXCEEDED"
+                            continue
+                            
+                        # === O(1) LATERAL MOMENT VETO ===
+                        test_centroid_y = y_coord + (w_effective / 2.0)
+                        test_left_load = item.weight * ((truck_w - test_centroid_y) / truck_w)
+                        test_right_load = item.weight * (test_centroid_y / truck_w)
+                        
+                        test_left_axle = left_axle_weight + test_left_load
+                        test_right_axle = right_axle_weight + test_right_load
+                        test_imbalance = abs(test_left_axle - test_right_axle) * 9.81 * (truck_w / 2.0)
+                        
+                        current_packed_weight = sum(item_map[pi.id].weight for pi in packed_items)
+                        new_total_weight = current_packed_weight + item.weight
+                        current_cg_z = 0.0
+                        if current_packed_weight > 0:
+                            current_cg_z = sum((pi.coordinates.z + pi.orientation_height/2.0) * item_map[pi.id].weight for pi in packed_items) / current_packed_weight
+                            
+                        test_cg_z = (current_cg_z * current_packed_weight + (ep.z + h/2.0) * item.weight) / new_total_weight
+                        
+                        test_tolerance = 150000.0
+                        if request.truck.suspension_type == "AIR":
+                            test_tolerance = 250000.0
+                        elif request.truck.suspension_type == "HEAVY_DUTY_LEAF":
+                            test_tolerance = 200000.0
+                            
+                        test_cg_z_penalty = 1.0
+                        if test_cg_z > (truck_h * 0.4):
+                            test_cg_z_penalty = 1.0 - (((test_cg_z / truck_h) - 0.4) * 1.5)
+                            
+                        test_max_moment = test_tolerance * max(0.2, test_cg_z_penalty)
+                        
+                        if test_imbalance > test_max_moment:
+                            item_failure_reason = "LATERAL_IMBALANCE_VETO"
                             continue
                             
                         best_point = Coordinate(x=ep.x, y=y_coord, z=ep.z)
@@ -789,69 +888,18 @@ def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_tok
                 pending_items.remove(item)
                 placed_any = True
                 
-                # Cumulative Mass CG Auditing (Heuristic Rollback)
-                if cluster_mass >= CUMULATIVE_MASS_THRESHOLD and not degraded_mode:
-                    cluster_cg_y = sum((pi.coordinates.y + (pi.orientation_width + pi.dunnage_margin)/2.0) * item_map[pi.id].weight for pi in cluster_packed_items) / cluster_mass
-                    if abs(cluster_cg_y - (truck_w / 2.0)) > MAX_CG_DEVIATION:
-                        # HEURISTIC ROLLBACK TRIGGERED
-                        if not seek_y_max: # Only rollback once per cluster to prevent infinite loop
-                            # Re-add items to pending
-                            for pi in cluster_packed_items:
-                                pending_items.append(item_map[pi.id])
-                            # Remove from packed_items
-                            packed_items = [p for p in packed_items if p not in cluster_packed_items]
-                            # Reset cluster state
-                        
-                        cluster_mass = 0.0
-                        cluster_packed_items = []
-                        seek_y_max = True
-                        # Recalculate weights
-                        left_axle_weight, right_axle_weight = 0.0, 0.0
-                        for pi in packed_items:
-                            w_eff = pi.orientation_width + pi.dunnage_margin
-                            centroid_y = pi.coordinates.y + (w_eff / 2.0)
-                            left_load = item_map[pi.id].weight * ((truck_w - centroid_y) / truck_w)
-                            right_load = item_map[pi.id].weight * (centroid_y / truck_w)
-                            left_axle_weight += left_load
-                            right_axle_weight += right_load
-                        # Sort pending items again
-                        pending_items = sorted(pending_items, key=lambda i: i.weight, reverse=True)
-                        placed_any = True
-                        break # Restart placement with seek_y_max
-                    else:
-                        # Rollback again, triggering Centerline Anchor for heaviest item
-                        heaviest_pi = max(cluster_packed_items, key=lambda pi: item_map[pi.id].weight)
-                        force_anchor_id = heaviest_pi.id
-                        
-                        # Re-add items to pending
-                        for pi in cluster_packed_items:
-                            pending_items.append(item_map[pi.id])
-                        packed_items = [p for p in packed_items if p not in cluster_packed_items]
-                        cluster_mass = 0.0
-                        cluster_packed_items = []
-                        seek_y_max = False # Reset heuristic
-                        
-                        left_axle_weight, right_axle_weight = 0.0, 0.0
-                        for pi in packed_items:
-                            w_eff = pi.orientation_width + pi.dunnage_margin
-                            centroid_y = pi.coordinates.y + (w_eff / 2.0)
-                            left_load = item_map[pi.id].weight * ((truck_w - centroid_y) / truck_w)
-                            right_load = item_map[pi.id].weight * (centroid_y / truck_w)
-                            left_axle_weight += left_load
-                            right_axle_weight += right_load
-                            
-                        pending_items = sorted(pending_items, key=lambda i: (i.id == force_anchor_id, i.weight), reverse=True)
-                        placed_any = True
-                        break
+                if cluster_mass >= CUMULATIVE_MASS_THRESHOLD:
+                    cluster_mass = 0.0
+                    cluster_packed_items = []
                 
-                # Reset cluster if successful or already rolled back
-                cluster_mass = 0.0
-                cluster_packed_items = []
-                seek_y_max = False
-            
-            break
+                break # Move to next item after placing
             
         if not placed_any:
+            # We failed to place 'item'. Record the failure reason.
+            unpacked_items.append(UnpackedItem(id=item.id, reason=item_failure_reason))
+            # Any items remaining after this one also fail because the loop aborts
+            for remaining_item in pending_items[1:]:
+                unpacked_items.append(UnpackedItem(id=remaining_item.id, reason="BLOCKED_BY_PREVIOUS_FAILURE"))
             break
 
     # === TOPOLOGICAL FILO SEQUENCER (DAG) ===
@@ -941,14 +989,14 @@ def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_tok
     for index, pi in enumerate(packed_items):
         pi.step_sequence = index + 1
                 
-    unpacked_ids = [item.id for item in pending_items]
-    status = "SUCCESS" if not unpacked_ids else "PARTIAL_SUCCESS"
+    status = "SUCCESS" if not unpacked_items else "PARTIAL_SUCCESS"
     
     rejection_reason = None
     if status == "PARTIAL_SUCCESS":
-        current_weight = sum(item_map[pi.id].weight for pi in packed_items)
-        if any(current_weight + item_map[uid].weight > request.truck.max_weight for uid in unpacked_ids):
+        if any(ui.reason == "GROSS_WEIGHT_EXCEEDED" for ui in unpacked_items):
             rejection_reason = "WEIGHT"
+        elif any(ui.reason == "LATERAL_IMBALANCE_VETO" for ui in unpacked_items):
+            rejection_reason = "LATERAL_IMBALANCE"
         else:
             rejection_reason = "VOLUME"
     
@@ -962,25 +1010,82 @@ def run_packing_algorithm(request: PackingRequest, degraded_mode: bool, lock_tok
     max_possible_complexity = (request.config.rotation_penalty_sec + request.config.z_axis_penalty_sec) * total_items_packed
     hcs = (complex_handling_score / max_possible_complexity * 100) if max_possible_complexity > 0 else 0.0
     
+    # --- Dynamic Analytics Math ---
+    truck_vol = request.truck.length * request.truck.width * request.truck.height
+    cargo_vol = sum((pi.orientation_length * (pi.orientation_width + pi.dunnage_margin) * pi.orientation_height) for pi in packed_items)
+    volume_utilization = round((cargo_vol / truck_vol) * 100, 1) if truck_vol > 0 else 0.0
+    
+    # O(1) Continuous Mass-Moment Safety Pre-Check
+    global_imbalance_moment = abs(left_axle_weight - right_axle_weight) * (truck_w / 2.0)
+    realistic_max_counter_moment = truck_w * (request.truck.max_weight * 0.1) # 10% payload tolerance limit
+    is_safe = global_imbalance_moment <= realistic_max_counter_moment
+    
+    decision_codes = []
+    # Metadata-driven logic
+    if any(item_map[pi.id].required_temperature for pi in packed_items):
+        decision_codes.append("CLASS_VENTILATION")
+    
+    # Geometry-driven logic
+    if any(pi.coordinates.z > 0 for pi in packed_items):
+        decision_codes.append("MAX_DENSITY")
+    if global_imbalance_moment > 0 and is_safe:
+        # If it was safely balanced despite some imbalance
+        decision_codes.append("FORCED_CENTER")
+        
+    safety_alerts = []
+    if request.truck.requires_maintenance:
+        safety_alerts.append("MAINTENANCE_WARNING")
+    
     analytics_data = AnalyticsData(
         total_eta_seconds=total_eta_seconds,
         total_items_packed=total_items_packed,
-        handling_complexity_score=round(hcs, 2)
+        handling_complexity_score=round(hcs, 2),
+        is_safe=is_safe,
+        volume_utilization=volume_utilization,
+        decision_codes=decision_codes,
+        safety_alerts=safety_alerts
     )
     
     return PackingResponse(
         status=status,
         rejection_reason=rejection_reason,
         packed_items=packed_items,
-        unpacked_ids=unpacked_ids,
+        unpacked_items=unpacked_items,
         left_weight=left_axle_weight,
         right_weight=right_axle_weight,
         payload_cg=payload_cg,
         analytics=analytics_data
     )
 
+def persist_overflow_items(items: List[UnpackedItem]):
+    if not items:
+        return
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    now = datetime.datetime.utcnow().isoformat() + "Z"
+    for item in items:
+        c.execute("INSERT INTO overflow_queue (cargo_id, reason, timestamp) VALUES (?, ?, ?)", (item.id, item.reason, now))
+    conn.commit()
+    conn.close()
+
+class OverflowQueueItem(BaseModel):
+    id: int
+    cargo_id: str
+    reason: str
+    timestamp: str
+
+@app.get("/api/v1/overflow", response_model=List[OverflowQueueItem], dependencies=[Depends(verify_api_key)])
+def get_overflow_queue():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM overflow_queue ORDER BY timestamp DESC")
+    items = [dict(row) for row in c.fetchall()]
+    conn.close()
+    return items
+
 @app.post("/api/v1/optimize", response_model=PackingResponse, dependencies=[Depends(verify_api_key)])
-def optimize_packing(request: PackingRequest, degraded_mode: bool = False):
+def optimize_packing(request: PackingRequest, background_tasks: BackgroundTasks, degraded_mode: bool = False):
     for item in request.cargo:
         if item.length > request.truck.length or item.width > request.truck.width or item.height > request.truck.height:
             raise HTTPException(status_code=422, detail=f"Dimensional Overflow: Item {item.id} exceeds maximum truck boundaries.")
@@ -1014,6 +1119,9 @@ def optimize_packing(request: PackingRequest, degraded_mode: bool = False):
         """, (lock_token,))
         conn.commit()
         conn.close()
+        
+        if response.unpacked_items:
+            background_tasks.add_task(persist_overflow_items, response.unpacked_items)
         
         # TODO: Trigger push to Google Sheets API
         return response
@@ -1081,7 +1189,8 @@ def get_steps(plan_id: str):
 def push_to_sheets(plan_id: str):
     """Push a loading plan to Google Sheets. Returns not_configured if env vars are absent."""
     google_creds = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
-    sheet_id = os.getenv("GOOGLE_SHEET_ID")
+    # Support both GOOGLE_SHEET_ID and CURRENT_SHEET_ID variable names
+    sheet_id = os.getenv("GOOGLE_SHEET_ID") or os.getenv("CURRENT_SHEET_ID")
     if not google_creds or not sheet_id:
         return {"status": "not_configured", "message": "Google Sheets integration is not configured. Set GOOGLE_SHEETS_CREDENTIALS and GOOGLE_SHEET_ID in .env to enable."}
     
@@ -1154,7 +1263,165 @@ async def sync_manifest(request: SyncManifestRequest, background_tasks: Backgrou
             
     background_tasks.add_task(process_and_queue)
     
+    background_tasks.add_task(process_and_queue)
+    
     return {"status": "Accepted", "message": "Manifest queued for processing."}
+
+# --- MOBILE SYNC API ---
+
+class MobileSyncItem(BaseModel):
+    cargo_id: str
+    weight: float
+    length: float
+    width: float
+    height: float
+    is_hazardous: bool
+    is_fragile: bool
+    expected_seal_number: Optional[str]
+    regulatory_placard_required: bool
+    drop_stop_number: int
+    destination_zone: Optional[str]
+    step_sequence: int
+    orientation_instruction: str
+    positioning_translation: str
+    dunnage_instruction: str
+
+class MobileSyncResponse(BaseModel):
+    plan_id: str
+    truck_id: str
+    total_items: int
+    loading_sequence: List[MobileSyncItem]
+
+class ConfirmedPallet(BaseModel):
+    cargo_id: str
+    scanned_at_utc: str
+    operator_id: str
+    verified_seal_number: Optional[str] = None
+    sequence_deviation_acknowledged: bool = False
+    scan_method: str = "LASER"
+
+def get_positioning_translation(x: float, y: float, z: float, truck_w: float, truck_l: float) -> str:
+    # Lateral
+    if y < truck_w * 0.33:
+        lat = "Left Wall (Driver Side)"
+    elif y > truck_w * 0.66:
+        lat = "Right Wall (Passenger Side)"
+    else:
+        lat = "Center Deck"
+    # Longitudinal
+    if x < truck_l * 0.33:
+        longi = "Front (Near Cab)"
+    elif x > truck_l * 0.66:
+        longi = "Rear (Near Doors)"
+    else:
+        longi = "Middle"
+    # Vertical
+    vert = "Stacked" if z > 0 else "Base Layer"
+    return f"{vert} on {lat}, {longi}"
+
+@app.get("/api/v1/plans/{plan_id}/sync", response_model=MobileSyncResponse, dependencies=[Depends(verify_api_key)])
+def get_mobile_sync(plan_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    c.execute("SELECT truck_id FROM loading_plans WHERE id = ?", (plan_id,))
+    plan_row = c.fetchone()
+    if not plan_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Plan not found")
+    truck_id = plan_row["truck_id"]
+    
+    c.execute("SELECT * FROM trucks WHERE id = ?", (truck_id,))
+    truck_row = c.fetchone()
+    if not truck_row:
+        truck_w, truck_l = 240.0, 1000.0
+    else:
+        truck_w = truck_row["width"]
+        truck_l = truck_row["length"]
+    
+    c.execute("SELECT * FROM loading_plan_steps WHERE plan_id = ? ORDER BY sequence_number ASC", (plan_id,))
+    steps = [dict(row) for row in c.fetchall()]
+    
+    sync_items = []
+    for step in steps:
+        c.execute("SELECT * FROM cargo_items WHERE id = ?", (step["cargo_item_id"],))
+        cargo_row = c.fetchone()
+        if not cargo_row:
+            continue
+        cargo_dict = dict(cargo_row)
+        
+        rot = "Load Sideways" if step["orientation_width"] == cargo_dict["length"] else "Load Straight"
+        dunnage_parts = []
+        for d_key in ["dunnage_left", "dunnage_right", "dunnage_front", "dunnage_back"]:
+            if step.get(d_key): dunnage_parts.append(step[d_key])
+        dunnage_str = ", ".join(dunnage_parts) if dunnage_parts else "None"
+        
+        pos = get_positioning_translation(step["x"], step["y"], step["z"], truck_w, truck_l)
+        
+        sync_items.append(MobileSyncItem(
+            cargo_id=step["cargo_item_id"],
+            weight=cargo_dict["weight"],
+            length=cargo_dict["length"],
+            width=cargo_dict["width"],
+            height=cargo_dict["height"],
+            is_hazardous=bool(cargo_dict["is_hazardous"]),
+            is_fragile=bool(cargo_dict["is_fragile"]),
+            expected_seal_number=cargo_dict.get("expected_seal_number"),
+            regulatory_placard_required=bool(cargo_dict.get("regulatory_placard_required")),
+            drop_stop_number=cargo_dict.get("drop_stop_number") or 1,
+            destination_zone=cargo_dict.get("destination_zone"),
+            step_sequence=step["sequence_number"],
+            orientation_instruction=rot,
+            positioning_translation=pos,
+            dunnage_instruction=dunnage_str
+        ))
+        
+    conn.close()
+    return MobileSyncResponse(
+        plan_id=plan_id,
+        truck_id=truck_id,
+        total_items=len(sync_items),
+        loading_sequence=sync_items
+    )
+
+@app.post("/api/v1/plans/{plan_id}/sync", dependencies=[Depends(verify_api_key)])
+def post_mobile_sync(plan_id: str, batch: List[ConfirmedPallet]):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    is_compromised = False
+    compromised_reason = []
+    
+    for pallet in batch:
+        c.execute("""
+            INSERT INTO confirmed_pallets 
+            (plan_id, cargo_id, scanned_at, operator_id, verified_seal_number, sequence_deviation_acknowledged, scan_method) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(plan_id, cargo_id) DO UPDATE SET
+                scanned_at = excluded.scanned_at,
+                operator_id = excluded.operator_id,
+                verified_seal_number = excluded.verified_seal_number,
+                scan_method = excluded.scan_method
+            WHERE excluded.scan_method = 'LASER' AND confirmed_pallets.scan_method = 'MANUAL_RECOVERY'
+        """, (plan_id, pallet.cargo_id, pallet.scanned_at_utc, pallet.operator_id, pallet.verified_seal_number, int(pallet.sequence_deviation_acknowledged), pallet.scan_method))
+        
+        if pallet.sequence_deviation_acknowledged:
+            is_compromised = True
+            compromised_reason.append(f"Cargo {pallet.cargo_id} loaded out of sequence.")
+            
+    if is_compromised:
+        reason_str = " | ".join(compromised_reason)
+        now = datetime.datetime.utcnow().isoformat() + "Z"
+        c.execute("""
+            UPDATE loading_plans 
+            SET status = 'COMPROMISED', compromised_at = ?, compromised_reason = ? 
+            WHERE id = ?
+        """, (now, reason_str, plan_id))
+        
+    conn.commit()
+    conn.close()
+    return {"status": "success", "processed": len(batch)}
 
 
 @app.get("/health")

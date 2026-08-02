@@ -19,10 +19,20 @@
         <TresMeshStandardMaterial
           :color="boxColor(step)"
           :emissive="boxEmissive(step)"
-          :emissive-intensity="isHighlighted(step) ? 0.6 : (isSelected(step) ? 0.4 : 0)"
+          :emissive-intensity="getEmissiveIntensity(step)"
           :opacity="boxOpacity(step)"
           :transparent="true"
         />
+
+        <Html
+          v-if="step.cargo_items?.is_hazardous && (hoveredId === stepId(step) || isSelected(step))"
+          center
+          :position="[0, (step.orientation_height / 2) + 0.5, 0]"
+        >
+          <div class="hazmat-badge">
+            <span class="icon">[!]</span> HAZMAT
+          </div>
+        </Html>
 
         <!-- Edge outline for selected/highlighted items -->
         <TresLineSegments :visible="isHighlighted(step) || isSelected(step)">
@@ -81,6 +91,7 @@
 <script setup>
 import { ref } from 'vue'
 import * as THREE from 'three'
+import { Html } from '@tresjs/cientos'
 import { useLoadingStore } from '../../stores/useLoadingStore'
 
 const props = defineProps({
@@ -159,16 +170,33 @@ function isSelected(step) {
   return store.selectedStep && (store.selectedStep.cargo_item_id || store.selectedStep.id) === stepId(step)
 }
 
+function isCold(step) {
+  const temp = step.cargo_items?.required_temperature || ''
+  return temp.includes('Cold') || temp.includes('-20') || temp.includes('2-8')
+}
+
+function getEmissiveIntensity(step) {
+  if (step.cargo_items?.is_hazardous) return 0.8
+  if (isCold(step)) return 0.6
+  if (isHighlighted(step)) return 0.6
+  if (isSelected(step)) return 0.4
+  return 0
+}
+
 function boxColor(step) {
+  if (step.cargo_items?.is_hazardous) return '#FF0000'
+  if (isCold(step)) return '#A0DFFF'
   if (props.operatorMode) {
     if (isHighlighted(step)) return '#3b82f6'
     return '#1e3a5f'
   }
   if (isSelected(step)) return '#6366f1'
-  return step.cargo_items?.is_fragile ? '#ef4444' : '#3b82f6'
+  return step.cargo_items?.is_fragile ? '#f59e0b' : '#3b82f6'
 }
 
 function boxEmissive(step) {
+  if (step.cargo_items?.is_hazardous) return '#FF0000'
+  if (isCold(step)) return '#A0DFFF'
   if (isHighlighted(step)) return '#1d4ed8'
   if (isSelected(step)) return '#312e81'
   return '#000000'
@@ -201,3 +229,24 @@ function onLeave() {
   emit('box-leave')
 }
 </script>
+
+<style scoped>
+.hazmat-badge {
+  background: rgba(255, 0, 0, 0.9);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: bold;
+  font-size: 12px;
+  letter-spacing: 1px;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+  border: 1px solid #ffcccc;
+  text-transform: uppercase;
+}
+.hazmat-badge .icon {
+  font-weight: 900;
+  margin-right: 2px;
+}
+</style>

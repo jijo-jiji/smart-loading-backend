@@ -7,23 +7,31 @@ abstract class ScannerEvent extends Equatable {
   List<Object?> get props => [];
 }
 
-class ScanInitiated extends ScannerEvent {
+class BarcodeDetected extends ScannerEvent {
   final String rawData;
-  final double weight;
-  final double length;
-  final double width;
-  final double height;
 
-  const ScanInitiated({
-    required this.rawData,
-    required this.weight,
-    required this.length,
-    required this.width,
-    required this.height,
-  });
+  const BarcodeDetected(this.rawData);
 
   @override
-  List<Object?> get props => [rawData, weight, length, width, height];
+  List<Object?> get props => [rawData];
 }
 
-class ScanProcessed extends ScannerEvent {}
+class PalletPlaced extends ScannerEvent {
+  final String trackingId;
+
+  const PalletPlaced(this.trackingId);
+
+  @override
+  List<Object?> get props => [trackingId];
+}
+
+class AmberAlertAcknowledged extends ScannerEvent {
+  final String trackingId;
+
+  const AmberAlertAcknowledged(this.trackingId);
+
+  @override
+  List<Object?> get props => [trackingId];
+}
+
+class ServerCompromised extends ScannerEvent {}

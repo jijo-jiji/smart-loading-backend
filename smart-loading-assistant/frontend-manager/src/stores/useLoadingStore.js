@@ -18,39 +18,16 @@ export const useLoadingStore = defineStore('loading', {
     kpiData: (state) => {
       if (!state.activePlan) return null
       const truck = state.activePlan.trucks
-      const totalWeight = (state.activePlan.left_weight_kg || 0) + (state.activePlan.right_weight_kg || 0)
       const truckCapacity = truck?.max_weight || 1
-      const weightPct = Math.min(100, (totalWeight / truckCapacity) * 100)
-
       const truckVol = (truck?.length || 1) * (truck?.width || 1) * (truck?.height || 1)
       const usedVol = state.currentSteps.reduce((acc, s) => {
         return acc + (s.orientation_length * s.orientation_width * s.orientation_height)
       }, 0)
       const volumePct = Math.min(100, (usedVol / truckVol) * 100)
 
-      // CG deviation from centerline (truck_w / 2)
-      const truckW = truck?.width || 240
-      const cgY = state.activePlan.cg_y || 0
-      const cgDeviation = Math.abs(cgY - (truckW / 2))
-      const cgStatus = cgDeviation <= 10 ? 'SAFE' : 'UNSAFE'
-      
-      const leftW = state.activePlan.left_weight_kg || 0
-      const rightW = state.activePlan.right_weight_kg || 0
-      const total = leftW + rightW || 1
-      const leftPct = (leftW / total) * 100
-      const rightPct = (rightW / total) * 100
-
       return {
-        totalWeight,
         truckCapacity,
-        weightPct,
-        volumePct,
-        cgDeviation: cgDeviation.toFixed(1),
-        cgStatus,
-        leftPct,
-        rightPct,
-        leftW,
-        rightW,
+        volumePct
       }
     },
 

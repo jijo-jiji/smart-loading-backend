@@ -3,8 +3,8 @@
     <TresCanvas clear-color="#111827" shadows>
       <TresPerspectiveCamera
         ref="cameraRef"
-        :position="[store.trailer.width / 2, 10, store.trailer.length + 15]"
-        :look-at="[store.trailer.width / 2, 0, store.trailer.length / 2]"
+        :position="cameraPos"
+        :look-at="cameraTarget"
       />
       
       <!-- Orbit Controls -->
@@ -19,8 +19,11 @@
       <TresDirectionalLight :position="[10, 20, 10]" :intensity="1" cast-shadow />
 
       <!-- Trailer Floor Grid -->
-      <TresMesh :position="[store.trailer.width / 2, -0.01, store.trailer.length / 2]" :rotation="[-Math.PI / 2, 0, 0]">
-        <TresPlaneGeometry :args="[store.trailer.width, store.trailer.length, Math.ceil(store.trailer.width), Math.ceil(store.trailer.length)]" />
+      <TresMesh
+        :position="[truckW_m / 2, -0.01, truckL_m / 2]"
+        :rotation="[-Math.PI / 2, 0, 0]"
+      >
+        <TresPlaneGeometry :args="[truckW_m, truckL_m, Math.ceil(truckW_m), Math.ceil(truckL_m)]" />
         <TresMeshBasicMaterial color="#374151" wireframe />
       </TresMesh>
 
@@ -71,6 +74,35 @@ import CargoMesh from './scene/CargoMesh.vue'
 const store = useTransshipmentStore()
 const loadingStore = useLoadingStore()
 const cameraRef = ref(null)
+
+// Derive true truck dimensions in world-space meters from live plan (cm * 0.01)
+// Fallback to mock transshipment store values if no plan is active
+const truckL_m = computed(() => {
+  const t = loadingStore.activePlan?.trucks
+  return t ? t.length * 0.01 : store.trailer.length
+})
+const truckW_m = computed(() => {
+  const t = loadingStore.activePlan?.trucks
+  return t ? t.width * 0.01 : store.trailer.width
+})
+const truckH_m = computed(() => {
+  const t = loadingStore.activePlan?.trucks
+  return t ? t.height * 0.01 : store.trailer.height
+})
+
+// Position camera at rear-elevated view (behind the open doors looking in toward headboard)
+// Backend X=0 is front/headboard, X=max is rear/doors → Three.js Z=0 is headboard, Z=max is doors
+// Camera at Z > truckL looks inward through the open rear, giving a clear view of all packed items
+const cameraPos = computed(() => [
+  truckW_m.value / 2,
+  truckH_m.value * 2.5,
+  truckL_m.value * 2.2
+])
+const cameraTarget = computed(() => [
+  truckW_m.value / 2,
+  truckH_m.value * 0.3,
+  truckL_m.value * 0.3
+])
 
 const isCollisionTarget = (trackingId) => {
   if (!store.selectedRejection) return false

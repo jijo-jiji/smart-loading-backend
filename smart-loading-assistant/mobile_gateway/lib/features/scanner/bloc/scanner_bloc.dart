@@ -1,55 +1,85 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:drift/drift.dart';
 import 'dart:async';
 import 'scanner_event.dart';
 import 'scanner_state.dart';
-import '../repository/scanner_repository.dart';
+import '../../../data/database/app_database.dart';
 
 class ScannerBloc extends Bloc<ScannerEvent, ScannerState> {
-  final ScannerRepository scannerRepository;
-  late final StreamSubscription<String> _scannerSubscription;
+  final AppDatabase db;
+  final String currentPlanId; 
+  final String currentOperatorId;
 
-  ScannerBloc({required this.scannerRepository}) : super(ScannerInitial()) {
-    on<ScanInitiated>((event, emit) async {
-      emit(ScannerProcessing());
-      
-      // Kinetic responsibility: physically impossible payloads
-      if (event.weight <= 0) {
-        emit(const ScannerFailure("Weight must be > 0."));
-        return;
-      }
-      
-      final volume = event.length * event.width * event.height;
-      if (volume < 1) {
-        emit(const ScannerFailure("Mass volume must be >= 1."));
-        return;
-      }
-
-      // Cryptographic hash validation (40 to 64 chars)
-      if (event.rawData.length < 40 || event.rawData.length > 64) {
-        emit(const ScannerFailure("Invalid cryptographic tracking ID format."));
-        return;
-      }
-
-      // Simulate success saving to local DB for the boilerplate
-      emit(ScannerSuccess());
-    });
-
-    _scannerSubscription = scannerRepository.trackingIds.listen((trackingId) {
-      // Hardware laser triggered a scan
-      add(ScanInitiated(
-        rawData: trackingId,
-        weight: 10.0,
-        length: 1.0,
-        width: 1.0,
-        height: 1.0,
-      ));
-    });
+  ScannerBloc({
+    required this.db,
+    required this.currentPlanId,
+    required this.currentOperatorId,
+  }) : super(ScanningState()) {
+    
+    on<BarcodeDetected>(_onBarcodeDetected);
+    on<PalletPlaced>(_onPalletPlaced);
+    on<AmberAlertAcknowledged>(_onAmberAlertAcknowledged);
+    on<ServerCompromised>((event, emit) => emit(QuarantineState()));
   }
 
-  @override
-  Future<void> close() {
-    _scannerSubscription.cancel();
-    scannerRepository.dispose();
-    return super.close();
+  Future<void> _onBarcodeDetected(BarcodeDetected event, Emitter<ScannerState> emit) async {
+    // Only process if we are currently scanning. Ignore if we are already dealing with a scan.
+    if (state is! ScanningState) return;
+
+    // 1. Enter DebounceState to kill the 15x multi-scan hardware twitch
+    emit(DebounceState());
+    
+    // 2. Query LocalSteps for the hash
+    final step = await (db.select(db.localSteps)
+          ..where((tbl) => tbl.planId.equals(currentPlanId))
+          ..where((tbl) => tbl.cargoId.equals(event.rawData)))
+        .getSingleOrNull();
+
+    // 3. Mandatory 1.5s visual pause
+    await Future.delayed(const Duration(milliseconds: 1500));
+
+    if (step == null) {
+      // Alien Cargo! Drop into Amber Alert.
+      emit(AmberAlertState(event.rawData));
+    } else {
+      // Resolution successful. Show placement instructions.
+      emit(ResolutionState(
+        trackingId: event.rawData,
+        instruction: step.positioningTranslation,
+        isHazardous: step.isHazardous,
+      ));
+    }
+  }
+
+  Future<void> _onPalletPlaced(PalletPlaced event, Emitter<ScannerState> emit) async {
+    // The operator completed the heavy swipe-to-confirm physical workflow.
+    
+    // Write event to LocalOutbox
+    await db.into(db.localOutbox).insert(LocalOutboxCompanion.insert(
+      planId: currentPlanId,
+      cargoId: event.trackingId,
+      scannedAtUtc: DateTime.now().toUtc().toIso8601String(),
+      operatorId: currentOperatorId,
+      // Sequence deviation logic would go here if implemented locally, but for now we trust backend.
+    ));
+
+    // Return to ScanningState
+    emit(ScanningState());
+  }
+
+  Future<void> _onAmberAlertAcknowledged(AmberAlertAcknowledged event, Emitter<ScannerState> emit) async {
+    // The operator manually dismissed the high-friction Amber Alert.
+    
+    // Log the anomaly directly to LocalAnomalies
+    await db.into(db.localAnomalies).insert(LocalAnomaliesCompanion.insert(
+      cargoId: event.trackingId,
+      planId: currentPlanId,
+      scannedAtUtc: DateTime.now().toUtc().toIso8601String(),
+      operatorId: currentOperatorId,
+      anomalyType: const Value('ALIEN_CARGO'),
+    ));
+
+    // Safely return to scanning. The physics plan remains ACTIVE.
+    emit(ScanningState());
   }
 }

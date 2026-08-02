@@ -5,23 +5,7 @@
     </div>
 
     <template v-if="kpi">
-      <!-- Weight Utilization -->
-      <div class="kpi-section">
-        <div class="kpi-label">
-          <span>Weight Utilization</span>
-          <span class="kpi-value">{{ kpi.totalWeight.toFixed(0) }}kg / {{ kpi.truckCapacity.toFixed(0) }}kg</span>
-        </div>
-        <div class="gauge-track">
-          <div
-            class="gauge-fill weight"
-            :style="{ width: kpi.weightPct + '%' }"
-            :class="kpi.weightPct > 90 ? 'danger' : kpi.weightPct > 70 ? 'warn' : 'ok'"
-          ></div>
-        </div>
-        <div class="gauge-pct">{{ kpi.weightPct.toFixed(1) }}%</div>
-      </div>
-
-      <!-- Volumetric Utilization -->
+      <!-- Volume Utilization (from DB plan data) -->
       <div class="kpi-section">
         <div class="kpi-label">
           <span>Volume Utilization</span>
@@ -36,28 +20,28 @@
         </div>
       </div>
 
-      <!-- CG Balance Scale -->
-      <div class="kpi-section">
+      <!-- Weight Balance (from physicsStore after optimization) -->
+      <div class="kpi-section" v-if="physicsStore.analytics">
         <div class="kpi-label">
           <span>CG<sub>y</sub> Lateral Balance</span>
-          <span class="cg-badge" :class="kpi.cgStatus === 'SAFE' ? 'safe' : 'unsafe'">
-            {{ kpi.cgStatus }} · {{ kpi.cgDeviation }}cm dev
+          <span class="cg-badge" :class="physicsStore.isSafe ? 'safe' : 'unsafe'">
+            {{ physicsStore.isSafe ? 'SAFE' : 'DANGER' }}
           </span>
         </div>
 
         <!-- Balance Scale Visual -->
         <div class="balance-scale">
-          <div class="balance-side left" :style="{ height: Math.max(20, kpi.leftPct * 0.8) + 'px' }">
+          <div class="balance-side left" :style="{ height: Math.max(20, leftPct * 0.8) + 'px' }">
             <span class="balance-label">LEFT</span>
-            <span class="balance-weight">{{ kpi.leftW.toFixed(0) }}kg</span>
+            <span class="balance-weight">{{ physicsStore.leftWeight.toFixed(0) }}kg</span>
           </div>
-          <div class="balance-pivot" :class="kpi.cgStatus === 'SAFE' ? 'pivot-safe' : 'pivot-unsafe'">
-            <div class="pivot-line" :style="{ transform: `rotate(${(kpi.rightPct - kpi.leftPct) * 0.4}deg)` }"></div>
+          <div class="balance-pivot" :class="physicsStore.isSafe ? 'pivot-safe' : 'pivot-unsafe'">
+            <div class="pivot-line" :style="{ transform: `rotate(${(rightPct - leftPct) * 0.4}deg)` }"></div>
             <div class="pivot-base">▲</div>
           </div>
-          <div class="balance-side right" :style="{ height: Math.max(20, kpi.rightPct * 0.8) + 'px' }">
+          <div class="balance-side right" :style="{ height: Math.max(20, rightPct * 0.8) + 'px' }">
             <span class="balance-label">RIGHT</span>
-            <span class="balance-weight">{{ kpi.rightW.toFixed(0) }}kg</span>
+            <span class="balance-weight">{{ physicsStore.rightWeight.toFixed(0) }}kg</span>
           </div>
         </div>
 
@@ -66,8 +50,8 @@
             <div class="cg-center-line"></div>
             <div
               class="cg-indicator"
-              :style="{ left: Math.min(95, Math.max(5, (kpi.leftPct))) + '%' }"
-              :class="kpi.cgStatus === 'SAFE' ? 'cg-safe' : 'cg-unsafe'"
+              :style="{ left: Math.min(95, Math.max(5, leftPct)) + '%' }"
+              :class="physicsStore.isSafe ? 'cg-safe' : 'cg-unsafe'"
             ></div>
           </div>
           <div class="cg-track-labels">
@@ -75,6 +59,14 @@
             <span>Centerline</span>
             <span>R</span>
           </div>
+        </div>
+      </div>
+
+      <!-- No optimization yet -->
+      <div class="kpi-section" v-else>
+        <div class="kpi-label"><span>CG<sub>y</sub> Lateral Balance</span></div>
+        <div style="font-size: 11px; color: #64748b; text-align: center; padding: 8px 0;">
+          Run "Calculate Efficiency" to see balance data
         </div>
       </div>
 
@@ -88,7 +80,7 @@
           </div>
           <div class="coord">
             <span class="coord-label">Y</span>
-            <span class="coord-val" :class="kpi.cgStatus === 'SAFE' ? 'safe' : 'unsafe'">
+            <span class="coord-val" :class="physicsStore.analytics ? (physicsStore.isSafe ? 'safe' : 'unsafe') : ''">
               {{ (store.activePlan?.cg_y || 0).toFixed(1) }}cm
             </span>
           </div>
@@ -114,7 +106,7 @@
             <span>Dimensions:</span> <span>{{ store.selectedStep.orientation_length }}L × {{ store.selectedStep.orientation_width }}W × {{ store.selectedStep.orientation_height }}H</span>
           </div>
           <div class="selected-row">
-            <span>Center (X,Y,Z):</span> <span>{{ store.selectedStep.x.toFixed(1) }}, {{ store.selectedStep.y.toFixed(1) }}, {{ store.selectedStep.z.toFixed(1) }}</span>
+            <span>Center (X,Y,Z):</span> <span>{{ (store.selectedStep.x || 0).toFixed(1) }}, {{ (store.selectedStep.y || 0).toFixed(1) }}, {{ (store.selectedStep.z || 0).toFixed(1) }}</span>
           </div>
           <div class="selected-row" v-if="store.selectedStep.requires_dunnage">
             <span class="dunnage-warn">Dunnage Required:</span> <span>{{ store.selectedStep.dunnage_margin }}cm</span>
@@ -139,9 +131,21 @@
 <script setup>
 import { computed } from 'vue'
 import { useLoadingStore } from '../../stores/useLoadingStore'
+import { usePhysicsStore } from '../../stores/usePhysicsStore'
 
 const store = useLoadingStore()
+const physicsStore = usePhysicsStore()
 const kpi = computed(() => store.kpiData)
+
+// Derived left/right percentages from physicsStore (safe, no recalculation of physics)
+const leftPct = computed(() => {
+  const total = (physicsStore.leftWeight + physicsStore.rightWeight) || 1
+  return (physicsStore.leftWeight / total) * 100
+})
+const rightPct = computed(() => {
+  const total = (physicsStore.leftWeight + physicsStore.rightWeight) || 1
+  return (physicsStore.rightWeight / total) * 100
+})
 </script>
 
 <style scoped>
