@@ -7,5 +7,6 @@ httpx
 gspread
 google-auth
 python-jose[cryptography]
+bcrypt==3.2.2
 passlib[bcrypt]
 python-multipart
