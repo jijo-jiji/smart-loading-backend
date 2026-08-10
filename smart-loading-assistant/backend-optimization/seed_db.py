@@ -134,11 +134,14 @@ def seed():
         ("Test 6: The Hazmat Test", truck6, cargo6),
     ]
     
+    from fastapi import BackgroundTasks
+    
     for test_name, truck_model, cargo_models in tests:
         print(f"\nRunning {test_name}...")
         
         request = PackingRequest(truck=truck_model, cargo=cargo_models)
-        response = optimize_packing(request)
+        bg_tasks = BackgroundTasks()
+        response = optimize_packing(request, background_tasks=bg_tasks)
         
         manifest_id = str(uuid.uuid4())
         plan_id = str(uuid.uuid4())
