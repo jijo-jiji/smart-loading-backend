@@ -222,8 +222,8 @@ def seed():
         else:
             print("No items packed!")
         
-        if response.unpacked_ids:
-            print(f"Rejected {len(response.unpacked_ids)} items")
+        if response.unpacked_items:
+            print(f"Rejected {len(response.unpacked_items)} items")
 
 if __name__ == "__main__":
     seed()
