@@ -24,7 +24,7 @@ export const useAuthStore = defineStore('auth', () => {
     formData.append('username', usernameInput)
     formData.append('password', passwordInput)
 
-    const response = await fetch('http://localhost:8005/api/auth/login', {
+    const response = await fetch(`http://${window.location.hostname}:8005/api/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'

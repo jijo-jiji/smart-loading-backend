@@ -1,7 +1,7 @@
 import { useAuthStore } from '../stores/useAuthStore'
 import router from '../router'
 
-const API_URL = 'http://localhost:8005/api/v1'
+const API_URL = `http://${window.location.hostname}:8005/api/v1`
 const API_KEY = 'unikl_demo_secret_2026'
 
 function getHeaders() {

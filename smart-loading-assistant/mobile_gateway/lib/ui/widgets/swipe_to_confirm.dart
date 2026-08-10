@@ -8,11 +8,11 @@ class SwipeToConfirmWidget extends StatefulWidget {
   final double height;
 
   const SwipeToConfirmWidget({
-    Key? key,
+    super.key,
     required this.onConfirm,
     this.text = 'SWIPE TO CONFIRM',
     this.height = 120.0, // Oversized for thick gloves
-  }) : super(key: key);
+  });
 
   @override
   _SwipeToConfirmWidgetState createState() => _SwipeToConfirmWidgetState();
