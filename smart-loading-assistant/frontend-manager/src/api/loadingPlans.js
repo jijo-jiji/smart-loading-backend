@@ -1,8 +1,20 @@
 import { useAuthStore } from '../stores/useAuthStore'
 import router from '../router'
 
-const baseUrl = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:8005' : 'https://smart-loading-backend.onrender.com')
-const API_URL = `${baseUrl}/api/v1`
+// Resolved at build time by Vite. Set VITE_API_URL in your .env.production
+// for production, or it falls back to the Render URL on non-localhost hosts.
+const PROD_URL = 'https://smart-loading-backend.onrender.com'
+const LOCAL_URL = 'http://localhost:8005'
+
+function getBaseUrl() {
+  const envUrl = import.meta.env.VITE_API_URL
+  if (envUrl) return envUrl
+  const h = window.location.hostname
+  if (h === 'localhost' || h === '127.0.0.1') return LOCAL_URL
+  return PROD_URL
+}
+
+const API_URL = getBaseUrl() + '/api/v1'
 const API_KEY = 'unikl_demo_secret_2026'
 
 function getHeaders() {

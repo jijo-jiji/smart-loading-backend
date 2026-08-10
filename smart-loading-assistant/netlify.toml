@@ -1,0 +1,9 @@
+[build]
+  base      = "smart-loading-assistant/frontend-manager"
+  command   = "npm run build"
+  publish   = "smart-loading-assistant/frontend-manager/dist"
+
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200

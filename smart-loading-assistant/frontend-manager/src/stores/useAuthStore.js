@@ -1,6 +1,17 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
+const PROD_URL = 'https://smart-loading-backend.onrender.com'
+const LOCAL_URL = 'http://localhost:8005'
+
+function getBaseUrl() {
+  const envUrl = import.meta.env.VITE_API_URL
+  if (envUrl) return envUrl
+  const h = window.location.hostname
+  if (h === 'localhost' || h === '127.0.0.1') return LOCAL_URL
+  return PROD_URL
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem('access_token') || null)
   const username = ref(localStorage.getItem('username') || null)
@@ -24,7 +35,7 @@ export const useAuthStore = defineStore('auth', () => {
     formData.append('username', usernameInput)
     formData.append('password', passwordInput)
 
-    const baseUrl = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:8005' : 'https://smart-loading-backend.onrender.com')
+    const baseUrl = getBaseUrl()
     const response = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: {
