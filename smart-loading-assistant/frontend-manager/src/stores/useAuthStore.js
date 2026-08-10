@@ -24,7 +24,8 @@ export const useAuthStore = defineStore('auth', () => {
     formData.append('username', usernameInput)
     formData.append('password', passwordInput)
 
-    const response = await fetch(`http://${window.location.hostname}:8005/api/auth/login`, {
+    const baseUrl = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:8005' : 'https://smart-loading-backend.onrender.com')
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'
