@@ -9,22 +9,22 @@
    ================================================ */
 :root {
   /* Foundation */
-  --bg:          #F1F5F9;
-  --surface:     #FFFFFF;
-  --surface-2:   #F8FAFC;
-  --border:      #E2E8F0;
-  --border-mid:  #CBD5E1;
+  --bg:          #FFFFFF;
+  --surface:     #F0F9FF;
+  --surface-2:   #FFFFFF;
+  --border:      #CBD5E1;
+  --border-mid:  #94A3B8;
 
   /* Typography */
-  --text:        #334155;
-  --text-muted:  #64748B;
-  --text-faint:  #94A3B8;
+  --text:        #0F172A;
+  --text-muted:  #475569;
+  --text-faint:  #64748B;
 
-  /* Primary — Deep Matte Purple */
-  --primary:        #7E22CE;
-  --primary-light:  rgba(126, 34, 206, 0.08);
-  --primary-border: rgba(126, 34, 206, 0.25);
-  --primary-text:   #7E22CE;
+  /* Primary — Sky Blue Accent */
+  --primary:        #0284C7;
+  --primary-light:  #E0F2FE;
+  --primary-border: #0284C7;
+  --primary-text:   #0F172A;
 
   /* Secondary — Dusty Rose */
   --secondary:      #BE185D;
@@ -44,8 +44,8 @@
   --danger-border:  rgba(220, 38, 38, 0.25);
 
   /* 3D Canvas */
-  --canvas-bg:      #F1F5F9;
-  --canvas-line:    #475569;
+  --canvas-bg:      #0F172A;
+  --canvas-line:    #1E293B;
 }
 
 *, *::before, *::after {
