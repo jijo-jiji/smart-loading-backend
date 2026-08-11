@@ -61,31 +61,34 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background-color: var(--color-bg);
+  background: var(--bg);
 }
 
 .login-card {
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
   padding: 2.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.08);
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-  border: 1px solid var(--color-border);
+  margin: 1rem;
 }
 
 h2 {
   font-size: 1.5rem;
-  font-weight: 600;
-  color: var(--color-text);
+  font-weight: 800;
+  color: var(--primary);
   margin: 0;
   text-transform: uppercase;
   letter-spacing: 2px;
 }
 
 .subtitle {
-  color: var(--color-text-muted);
+  color: var(--text-muted);
   font-size: 0.875rem;
   margin: 0;
 }
@@ -106,32 +109,52 @@ h2 {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: var(--color-primary);
-  font-weight: 500;
+  color: var(--primary);
+  font-weight: 700;
 }
 
 input {
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid var(--color-border);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   padding: 0.75rem 1rem;
-  color: var(--color-text);
-  border-radius: 4px;
+  color: var(--text);
+  border-radius: 8px;
   font-family: inherit;
+  font-size: 0.9rem;
   transition: all 0.2s ease;
+  outline: none;
 }
 
 input:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(0, 240, 255, 0.2);
+  border-color: var(--primary-border);
+  box-shadow: 0 0 0 3px var(--primary-light);
 }
 
 .error-msg {
-  color: #ff3366;
+  color: var(--danger);
   font-size: 0.875rem;
-  background: rgba(255, 51, 102, 0.1);
+  background: var(--danger-light);
   padding: 0.75rem;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 51, 102, 0.2);
+  border-radius: 8px;
+  border: 1px solid var(--danger-border);
 }
+
+button[type="submit"] {
+  padding: 0.875rem;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.5px;
+}
+button[type="submit"]:hover:not(:disabled) {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+button[type="submit"]:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>

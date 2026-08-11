@@ -1,9 +1,64 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+
+/* ================================================
+   SMART LOADING DESIGN SYSTEM — Bright Palette v2
+   ================================================ */
+:root {
+  /* Foundation */
+  --bg:          #F1F5F9;
+  --surface:     #FFFFFF;
+  --surface-2:   #F8FAFC;
+  --border:      #E2E8F0;
+  --border-mid:  #CBD5E1;
+
+  /* Typography */
+  --text:        #334155;
+  --text-muted:  #64748B;
+  --text-faint:  #94A3B8;
+
+  /* Primary — Deep Matte Purple */
+  --primary:        #7E22CE;
+  --primary-light:  rgba(126, 34, 206, 0.08);
+  --primary-border: rgba(126, 34, 206, 0.25);
+  --primary-text:   #7E22CE;
+
+  /* Secondary — Dusty Rose */
+  --secondary:      #BE185D;
+  --secondary-light: rgba(190, 24, 93, 0.08);
+
+  /* Safety Semantics */
+  --safe:           #16A34A;
+  --safe-light:     rgba(22, 163, 74, 0.1);
+  --safe-border:    rgba(22, 163, 74, 0.25);
+
+  --warn:           #D97706;
+  --warn-light:     rgba(217, 119, 6, 0.1);
+  --warn-border:    rgba(217, 119, 6, 0.25);
+
+  --danger:         #DC2626;
+  --danger-light:   rgba(220, 38, 38, 0.1);
+  --danger-border:  rgba(220, 38, 38, 0.25);
+
+  /* 3D Canvas */
+  --canvas-bg:      #F1F5F9;
+  --canvas-line:    #475569;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
 
 html, body {
   margin: 0;
   padding: 0;
-  overflow: hidden;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 16px;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
 }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 4px; }
