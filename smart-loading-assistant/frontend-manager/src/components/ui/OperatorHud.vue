@@ -254,4 +254,56 @@ function handleConfirm() {
   border-radius: 6px;
   border: 1px solid rgba(255,255,255,0.05);
 }
+
+/* ─── RESPONSIVE: Mobile-First Breakpoint ─────────── */
+@media (max-width: 768px) {
+  .hud-wrap {
+    width: calc(100vw - 24px);
+    bottom: 16px;
+  }
+  .hud-glass {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 16px;
+    padding: 16px;
+    border-radius: 16px;
+  }
+  
+  .left-block {
+    grid-column: 1 / 2;
+    grid-row: 1 / 2;
+    padding-right: 0;
+    border-right: 1px solid rgba(148,163,184,0.1);
+  }
+  
+  .right-block {
+    grid-column: 2 / 3;
+    grid-row: 1 / 2;
+    padding-left: 0;
+    border-left: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+  }
+  
+  .hud-center {
+    grid-column: 1 / 3;
+    grid-row: 2 / 3;
+    padding: 16px 0 0 0;
+    border-top: 1px solid rgba(148,163,184,0.1);
+  }
+  
+  .confirm-btn {
+    width: 100%;
+    padding: 14px 20px;
+    font-size: 14px;
+  }
+  
+  /* Adjust typography to fit smaller blocks */
+  .weight-num { font-size: 28px; }
+  .hud-dims { font-size: 11px; padding: 4px 8px; }
+  .d-dir { font-size: 11px; padding: 3px 6px; }
+}
 </style>
