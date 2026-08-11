@@ -93,6 +93,7 @@ import { ref } from 'vue'
 import * as THREE from 'three'
 import { Html } from '@tresjs/cientos'
 import { useLoadingStore } from '../../stores/useLoadingStore'
+import { useTransshipmentStore } from '../../stores/useTransshipmentStore'
 
 const props = defineProps({
   steps: { type: Array, required: true },
@@ -103,6 +104,7 @@ const props = defineProps({
 const emit = defineEmits(['box-hover', 'box-leave', 'box-click'])
 
 const store = useLoadingStore()
+const transStore = useTransshipmentStore()
 const hoveredId = ref(null)
 
 function getDunnageStruts(step) {
@@ -183,8 +185,31 @@ function getEmissiveIntensity(step) {
   return 0
 }
 
+function getDensityColor(step) {
+  const depth = Math.round(step.x / 10) * 10
+  let sliceWeight = 0
+  store.currentSteps.forEach(s => {
+    if (Math.round(s.x / 10) * 10 === depth) {
+      sliceWeight += (s.cargo_items?.weight || 0)
+    }
+  })
+  
+  const maxSafeSliceMass = 2500
+  const ratio = Math.min(sliceWeight / maxSafeSliceMass, 1.0)
+  const r = Math.floor(255 * ratio)
+  const b = Math.floor(255 * (1 - ratio))
+  
+  // Output a format TresJS/ThreeJS accepts for CSS strings
+  return `rgb(${r}, 0, ${b})`
+}
+
 function boxColor(step) {
   if (step.cargo_items?.is_hazardous) return '#FF0000'
+  
+  if (transStore.viewMode === 'density') {
+    return getDensityColor(step)
+  }
+  
   if (isCold(step)) return '#A0DFFF'
   if (props.operatorMode) {
     if (isHighlighted(step)) return '#3b82f6'
@@ -196,6 +221,8 @@ function boxColor(step) {
 
 function boxEmissive(step) {
   if (step.cargo_items?.is_hazardous) return '#FF0000'
+  if (transStore.viewMode === 'density') return '#000000'
+  
   if (isCold(step)) return '#A0DFFF'
   if (isHighlighted(step)) return '#1d4ed8'
   if (isSelected(step)) return '#312e81'
