@@ -775,14 +775,21 @@ async function handlePushSheets() {
     display: flex !important; 
     width: 100% !important; 
     border-right: none; 
+    flex: 1;
+    height: 100%;
   }
   .manager-layout[data-mobile-tab="stage"] .stage { 
     display: flex !important; 
+    flex: 1;
+    height: 100%;
   }
   .manager-layout[data-mobile-tab="kpi"] .right-sidebar { 
     display: block !important; 
     width: 100% !important; 
     border-left: none; 
+    flex: 1;
+    height: 100%;
+    overflow-y: auto;
   }
 
   /* Reduce nav on mobile — hide right nav buttons */
