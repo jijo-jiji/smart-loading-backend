@@ -1,5 +1,5 @@
 <template>
-  <div class="manager-layout">
+  <div class="manager-layout" :data-mobile-tab="activeMobileTab">
     <!-- Top Navigation Bar -->
     <header class="top-nav">
       <div class="nav-left">
@@ -27,7 +27,7 @@
         >
           <span>📊</span> {{ sheetsLoading ? 'Pushing...' : 'Google Sheets' }}
         </button>
-        <RouterLink to="/operator" class="btn btn-primary">
+        <RouterLink to="/operator" class="btn btn-outline">
           Operator HUD →
         </RouterLink>
       </div>
@@ -39,6 +39,19 @@
         {{ sheetsToast.message }}
       </div>
     </Transition>
+
+    <!-- Mobile Tabs (Visible only on < 1024px) -->
+    <nav class="mobile-tabs">
+      <button :class="{ active: activeMobileTab === 'list' }" @click="activeMobileTab = 'list'">
+        Manifests
+      </button>
+      <button :class="{ active: activeMobileTab === 'stage' }" @click="activeMobileTab = 'stage'" :disabled="!store.activePlan">
+        3D View
+      </button>
+      <button :class="{ active: activeMobileTab === 'kpi' }" @click="activeMobileTab = 'kpi'" :disabled="!store.activePlan">
+        KPIs
+      </button>
+    </nav>
 
     <div class="flex flex-col md:flex-row flex-1 overflow-hidden">
       
@@ -63,7 +76,7 @@
             :key="plan.id"
             class="plan-card"
             :class="{ active: store.activePlan?.id === plan.id }"
-            @click="store.selectPlan(plan)"
+            @click="onSelectPlan(plan)"
           >
             <div class="plan-card-id">{{ plan.human_readable_id }}</div>
             <div class="plan-card-meta">
@@ -246,6 +259,8 @@ const sheetsLoading = ref(false)
 const sheetsToast = ref(null)
 const apiErrorBanner = ref(null)
 
+const activeMobileTab = ref('list')
+
 const showAdvancedSettings = ref(false)
 const operationalConfig = ref({
   base_handling_sec: 120,
@@ -314,6 +329,11 @@ onMounted(() => {
   store.startPolling()
 })
 onUnmounted(() => store.stopPolling())
+
+function onSelectPlan(plan) {
+  store.selectPlan(plan)
+  activeMobileTab.value = 'stage'
+}
 
 // Link stores if needed when plan changes
 watch(() => store.currentSteps, (newSteps) => {
@@ -533,6 +553,12 @@ async function handlePushSheets() {
 }
 .btn-primary:hover { filter: brightness(1.12); transform: translateY(-1px); }
 
+.btn-outline {
+  background: transparent; color: var(--primary); font-weight: 600;
+  border-color: var(--primary);
+}
+.btn-outline:hover { background: var(--primary-light); transform: translateY(-1px); }
+
 /* Toast */
 .sheets-toast {
   position: fixed; top: 68px; right: 20px;
@@ -587,10 +613,11 @@ async function handlePushSheets() {
 .plan-card {
   padding: 12px; border-radius: 10px; cursor: pointer;
   margin-bottom: 6px; border: 1px solid var(--border);
+  border-left: 4px solid transparent;
   background: var(--surface-2); transition: all 0.18s;
 }
-.plan-card:hover { border-color: var(--primary-border); background: var(--primary-light); }
-.plan-card.active { background: var(--primary-light); border-color: var(--primary-border); }
+.plan-card:hover { border-color: var(--primary-border); background: var(--primary-light); border-left-color: var(--primary-border); }
+.plan-card.active { background: var(--primary-light); border-color: var(--primary-border); border-left-color: var(--primary); }
 
 .plan-card-id {
   font-size: 13px; font-weight: 700; color: var(--text);
@@ -715,15 +742,47 @@ async function handlePushSheets() {
 .rej-reason { color: var(--danger); font-size: 11px; }
 
 /* ─── RESPONSIVE: Mobile-First Breakpoint ─────────── */
-@media (max-width: 1023px) {
-  /* Hide 3D canvas and KPI panel completely on mobile */
-  .stage         { display: none !important; }
-  .right-sidebar { display: none !important; }
+.mobile-tabs { display: none; }
 
-  /* Expand left sidebar to full width */
-  .left-sidebar {
-    width: 100% !important;
-    border-right: none;
+@media (max-width: 1023px) {
+  .mobile-tabs {
+    display: flex;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .mobile-tabs button {
+    flex: 1; padding: 10px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 8px; font-size: 13px; font-weight: 600;
+    color: var(--text-muted); transition: all 0.2s;
+  }
+  .mobile-tabs button.active {
+    background: var(--primary); color: #fff;
+    border-color: var(--primary);
+  }
+  .mobile-tabs button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* By default on mobile, force display rules so data attribute controls visibility */
+  .left-sidebar, .stage, .right-sidebar {
+    display: none !important;
+  }
+  
+  /* When tab is active, show the respective panel */
+  .manager-layout[data-mobile-tab="list"] .left-sidebar { 
+    display: flex !important; 
+    width: 100% !important; 
+    border-right: none; 
+  }
+  .manager-layout[data-mobile-tab="stage"] .stage { 
+    display: flex !important; 
+  }
+  .manager-layout[data-mobile-tab="kpi"] .right-sidebar { 
+    display: block !important; 
+    width: 100% !important; 
+    border-left: none; 
   }
 
   /* Reduce nav on mobile — hide right nav buttons */
